@@ -585,7 +585,10 @@ func TestRetryConfig_applyDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.input.applyDefaults()
-			if got != tt.want {
+			if got.MaxRetries != tt.want.MaxRetries ||
+				got.InitialWait != tt.want.InitialWait ||
+				got.MaxWait != tt.want.MaxWait ||
+				got.Disabled != tt.want.Disabled {
 				t.Errorf("applyDefaults() = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -944,5 +947,91 @@ func TestLoopStream(t *testing.T) {
 	}
 	if len(result.Messages) != 2 {
 		t.Errorf("expected 2 messages, got %d", len(result.Messages))
+	}
+}
+
+func TestAskStreamNilCallback(t *testing.T) {
+	p := newTestProvider()
+	p.Deltas = []ContentBlock{{Type: TypeText, Text: "hello"}}
+	c, _ := New(Config{Provider: p, Model: "test-model"})
+	// nil onToken must not panic
+	msg, err := c.AskStream(context.Background(), "", []Message{NewUserMessage("hi")}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if TextContent(msg) != "Hello from mock" {
+		t.Errorf("unexpected message content: %s", TextContent(msg))
+	}
+}
+
+func TestLoopStreamNilCallbacks(t *testing.T) {
+	p := newTestProvider()
+	p.Deltas = []ContentBlock{{Type: TypeText, Text: "hello"}}
+	c, _ := New(Config{Provider: p, Model: "test-model"})
+	// Both nil — must not panic even when provider fires deltas.
+	_, err := c.LoopStream(context.Background(), "", []Message{NewUserMessage("hi")}, nil, nil, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRetryConfigOnRetry(t *testing.T) {
+	ctx := context.Background()
+	var retryCalls []int
+	cfg := RetryConfig{
+		MaxRetries:  2,
+		InitialWait: time.Millisecond, // fast for tests
+		OnRetry:     func(attempt int, _ time.Duration) { retryCalls = append(retryCalls, attempt) },
+	}
+
+	calls := 0
+	_, err := callWithRetry(ctx, cfg, func() (ProviderResponse, error) {
+		calls++
+		if calls <= 2 {
+			return ProviderResponse{}, &APIError{StatusCode: 429, Message: "rate limited"}
+		}
+		return testResponse, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Two failures → two retries → OnRetry called twice, with attempt numbers 1 and 2.
+	if len(retryCalls) != 2 {
+		t.Fatalf("expected 2 OnRetry calls, got %d", len(retryCalls))
+	}
+	if retryCalls[0] != 1 || retryCalls[1] != 2 {
+		t.Errorf("unexpected attempt numbers: %v", retryCalls)
+	}
+}
+
+func TestRetryConfigOnRetryNotCalledOnSuccess(t *testing.T) {
+	ctx := context.Background()
+	var called bool
+	cfg := RetryConfig{
+		OnRetry: func(int, time.Duration) { called = true },
+	}
+	_, err := callWithRetry(ctx, cfg, func() (ProviderResponse, error) {
+		return testResponse, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Error("OnRetry should not be called when the first attempt succeeds")
+	}
+}
+
+func TestRetryConfigOnRetryNotCalledWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	var called bool
+	cfg := RetryConfig{
+		Disabled: true,
+		OnRetry:  func(int, time.Duration) { called = true },
+	}
+	_, _ = callWithRetry(ctx, cfg, func() (ProviderResponse, error) {
+		return ProviderResponse{}, &APIError{StatusCode: 503}
+	})
+	if called {
+		t.Error("OnRetry should not be called when retry is disabled")
 	}
 }

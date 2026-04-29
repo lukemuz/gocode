@@ -9,17 +9,26 @@ import (
 // are nil by default and are safe to leave unset. A zero-value Hooks struct
 // disables all observation.
 //
-// Per-iteration and per-tool-call hooks are planned for P2 and will be added
-// to this struct without breaking existing code.
+// Call order within a Step or StepStream call:
+//
+//  1. Context.Trim is called.
+//  2. OnStep is called with the trimmed history (skipped if Trim fails).
+//  3. Client.Loop or Client.LoopStream runs.
+//  4. OnStepDone is called with the result and any error from the loop.
+//
+// OnStepDone is NOT called when Trim fails — only when the loop itself returns.
+// Per-iteration and per-tool-call hooks are planned for a future release and
+// will be added to this struct without breaking existing code.
 type Hooks struct {
-	// OnStep is called after context trimming and before the Loop call, with
-	// the history that will actually be sent to the model. Useful for logging
-	// effective context size or recording that a step started.
+	// OnStep is called after context trimming and before the loop, with the
+	// trimmed history that will actually be sent to the model. Useful for
+	// logging effective context size or recording that a step started.
+	// Not called when Trim returns an error.
 	OnStep func(ctx context.Context, history []Message)
 
-	// OnStepDone is called after the Loop call returns, with the full result
-	// and any error. Called even when Loop returns an error so callers can
-	// record failures. Not called when context trimming itself fails.
+	// OnStepDone is called after the loop returns, with the full LoopResult
+	// and any error. Called even when the loop returns an error so callers
+	// can record failures uniformly. Not called when Trim itself fails.
 	OnStepDone func(ctx context.Context, result LoopResult, err error)
 }
 
@@ -74,10 +83,15 @@ type Assistant struct {
 // LoopResult contains the full updated conversation (trimmed history + new
 // turns) and aggregate token usage for this step.
 //
-// Step is equivalent to:
+// Step is equivalent to (omitting hooks for brevity):
 //
-//	trimmed, _ := a.Context.Trim(ctx, history)
+//	trimmed, err := a.Context.Trim(ctx, history)
+//	if err != nil {
+//	    return LoopResult{}, err
+//	}
 //	return a.Client.Loop(ctx, a.System, trimmed, a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter)
+//
+// Drop to these primitives at any time without changing your data model.
 func (a Assistant) Step(ctx context.Context, history []Message) (LoopResult, error) {
 	if a.Client == nil {
 		return LoopResult{}, fmt.Errorf("agent: Assistant.Client is required")
@@ -112,10 +126,20 @@ func (a Assistant) Step(ctx context.Context, history []Message) (LoopResult, err
 // then Client.LoopStream, delivering token deltas via onToken and tool results
 // via onToolResult as they arrive. Both callbacks may be nil.
 //
-// StepStream is equivalent to:
+// Retry interaction: onToken may fire for partial content on a failed attempt
+// before a successful retry. Wire a StreamBuffer via RetryConfig.OnRetry to
+// reset partial output between attempts.
 //
-//	trimmed, _ := a.Context.Trim(ctx, history)
-//	return a.Client.LoopStream(ctx, a.System, trimmed, a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter, onToken, onToolResult)
+// StepStream is equivalent to (omitting hooks and nil-callback guards):
+//
+//	trimmed, err := a.Context.Trim(ctx, history)
+//	if err != nil {
+//	    return LoopResult{}, err
+//	}
+//	return a.Client.LoopStream(ctx, a.System, trimmed,
+//	    a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter, onToken, onToolResult)
+//
+// Drop to these primitives at any time without changing your data model.
 func (a Assistant) StepStream(
 	ctx context.Context,
 	history []Message,

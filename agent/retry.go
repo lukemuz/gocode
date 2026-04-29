@@ -17,6 +17,11 @@ type RetryConfig struct {
 	InitialWait time.Duration // first back-off interval; 0 → use default (1s)
 	MaxWait     time.Duration // back-off ceiling; 0 → use default (30s)
 	Disabled    bool          // set true to disable all retrying
+
+	// OnRetry, when non-nil, is called before each retry sleep with the
+	// 1-based retry attempt number and the computed backoff duration.
+	// Use this to log retries or reset streaming state (see StreamBuffer).
+	OnRetry func(attempt int, wait time.Duration)
 }
 
 // defaults applied when the corresponding RetryConfig field is zero.
@@ -110,6 +115,10 @@ func callWithRetry(ctx context.Context, cfg RetryConfig, fn func() (ProviderResp
 
 		// Compute how long to wait before the next attempt.
 		wait := backoffWait(cfg, attempt, apiErr)
+
+		if cfg.OnRetry != nil {
+			cfg.OnRetry(attempt+1, wait)
+		}
 
 		select {
 		case <-ctx.Done():

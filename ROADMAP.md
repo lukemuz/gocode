@@ -58,23 +58,16 @@ P1 focuses on completing the path from primitives to useful local assistants.
 ### 1. Streaming retry semantics
 
 **Priority:** high  
-**Status:** next
+**Status:** done
 
-Current streaming callbacks may receive partial output from failed retry attempts before the successful attempt starts. That behavior is visible and honest, but it is easy to mishandle in CLIs and SSE endpoints.
+Streaming callbacks may receive partial output from failed retry attempts before the successful attempt starts.
 
-Recommended path:
+Shipped:
 
-- keep the existing `onToken func(ContentBlock)` signature
-- document the retry interaction prominently
-- provide a small stateful helper for callers that need clean buffering or reset behavior
-- use the helper in streaming recipes and the future HTTP/SSE example
-
-Principles:
-
-- do not silently deduplicate streamed tokens
-- do not buffer the whole response before delivery
-- avoid breaking callback signatures unless clearly necessary
-- make retry behavior visible to callers
+- `RetryConfig.OnRetry func(attempt int, wait time.Duration)` — called before each retry sleep, making retries observable
+- `StreamBuffer` — pairs `OnToken` (pass to `AskStream`/`LoopStream`/`StepStream`) with `OnRetry` (set as `RetryConfig.OnRetry`); calls an `onReset` callback before each retry so callers can clear partial output in a CLI or SSE stream
+- `AskStream` and `LoopStream` now accept nil callbacks without panicking
+- README updated with usage examples and cross-references
 
 ### 3. Recipe documentation
 
@@ -132,53 +125,29 @@ P2 adds production-oriented helpers without introducing a runner.
 
 ### 1. Assistant hardening
 
-**Priority:** high after P1
+**Priority:** high after P1  
+**Status:** done
 
-Keep `Assistant` thin as features accumulate. It should remain equivalent to context trimming plus `Client.Loop` or `Client.LoopStream`.
+Shipped:
 
-Focus areas:
-
-- clarify hook behavior
-- verify middleware ordering and streaming behavior
-- document desugared assistant steps
-- ensure advanced users can drop to primitives without changing data models
+- `Hooks` documentation now specifies the exact call order (Trim → OnStep → Loop/LoopStream → OnStepDone) and explicitly notes that `OnStepDone` is not called when `Trim` fails
+- Desugared-step comments in `Step` and `StepStream` now show the correct error-returning form instead of silently swallowing the trim error
+- `StepStream` doc cross-references `StreamBuffer` for retry-aware streaming
+- `LoopStream` nil-callback guard added at the `Client` level (consistent with `StepStream`)
 
 ### 2. Sessions without a runner
 
-**Priority:** medium
+**Priority:** medium  
+**Status:** done
 
-Add boring persistence for conversation history.
+Shipped:
 
-Possible shape:
-
-~~~go
-type Session struct {
-    ID      string
-    History []Message
-    State   map[string]any
-}
-
-type Store interface {
-    Create(ctx context.Context, session *Session) error
-    Get(ctx context.Context, id string) (*Session, error)
-    Update(ctx context.Context, session *Session) error
-    Delete(ctx context.Context, id string) error
-    List(ctx context.Context, prefix string, limit int) ([]*Session, error)
-}
-~~~
-
-Likely built-ins:
-
-- memory store for tests and development
-- file store for simple local apps
-
-Principles:
-
-- sessions do not call models
-- sessions do not run tools
-- sessions do not trim automatically
-- no runner abstraction
-- `Session.History` stays plain `[]Message`
+- `Session` struct: `ID string`, `History []Message`, `State map[string]any` — plain data, no hidden calls or lifecycle
+- `Store` interface: `Create`, `Get`, `Update`, `Delete`, `List` — `Create`/`Update` are intentionally separate to make caller intent explicit
+- `ErrSessionNotFound` and `ErrSessionExists` sentinel errors (both carry the offending ID in their message and match via `errors.Is`)
+- `MemoryStore` — in-memory, safe for concurrent use, deep-copies on all operations; suitable for tests and single-process development
+- `FileStore` — one JSON file per session, atomic writes via temp-file rename, ID validation to prevent path traversal; suitable for simple local apps
+- Shared contract test suite covering all five operations plus isolation and error-path checks, run against both stores
 
 ### 3. Durable tool execution
 
@@ -328,11 +297,11 @@ Higher-level systems can be built on top of `gocode`. The core should remain sma
 
 | Order | Item | Status |
 |---|---|---|
-| 1 | Streaming retry helper and docs | Next |
+| 1 | Streaming retry helper and docs | Done |
 | 2 | Recipe documentation | Next |
 | 3 | Repo explainer example | Next |
-| 5 | Assistant hardening | Planned |
-| 6 | Session/store helpers | Planned |
+| 5 | Assistant hardening | Done |
+| 6 | Session/store helpers | Done |
 | 7 | Durable tool execution middleware | Planned |
 | 8 | Observability hooks and OTel adapter | Planned |
 | 9 | Extended model configuration | Planned |
@@ -347,8 +316,7 @@ Higher-level systems can be built on top of `gocode`. The core should remain sma
 
 The next coherent milestone is:
 
-1. streaming retry helper/documentation
-2. recipes that show the practical path
-3. repo explainer example that ties together `Assistant`, `Toolset`, context management, workspace tools, and streaming
+1. recipes that show the practical path
+2. repo explainer example that ties together `Assistant`, `Toolset`, context management, workspace tools, and streaming
 
 That milestone should make `gocode` feel complete for local, practical agents while preserving the same simple foundation: ordinary Go code, visible data flow, explicit control.

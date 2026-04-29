@@ -412,7 +412,75 @@ _, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) 
 
 Use `LoopStream` or `Assistant.StepStream` for streamed tool loops.
 
-Streaming callbacks fire synchronously as provider deltas arrive. Because retries can restart a stream after partial output, callbacks may see partial text from failed attempts. See the roadmap for the planned helper and recipe around this behavior.
+Streaming callbacks fire synchronously as provider deltas arrive. Because retries can restart a stream after partial output, callbacks may see partial text from failed attempts before the successful attempt begins.
+
+Use `StreamBuffer` with `RetryConfig.OnRetry` to react to each retry and clear partial output:
+
+~~~go
+sb := agent.NewStreamBuffer(
+    func(b agent.ContentBlock) { fmt.Print(b.Text) }, // forward tokens live
+    func() { fmt.Print("\n[retrying…]\n") },           // clear on retry
+)
+cfg := agent.RetryConfig{OnRetry: sb.OnRetry}
+client, _ := agent.New(agent.Config{..., Retry: cfg})
+msg, err := client.AskStream(ctx, system, history, sb.OnToken)
+~~~
+
+Both callbacks may be nil. `OnRetry` also receives the 1-based retry attempt number and the computed backoff duration, which you can use for logging.
+
+## Sessions
+
+`Session` is plain data — it does not call models, run tools, or trim context. You load it, pass `History` to a model call, and persist the updated result yourself.
+
+~~~go
+sess, err := store.Get(ctx, sessionID)
+if errors.Is(err, agent.ErrSessionNotFound) {
+    sess = &agent.Session{ID: sessionID}
+} else if err != nil {
+    return err
+}
+
+sess.History = append(sess.History, agent.NewUserMessage(input))
+result, err := assistant.Step(ctx, sess.History)
+if err != nil {
+    return err
+}
+sess.History = result.Messages
+
+// Create on first use; Update on subsequent calls.
+if len(sess.History) == 1 {
+    err = store.Create(ctx, sess)
+} else {
+    err = store.Update(ctx, sess)
+}
+~~~
+
+Two built-in stores:
+
+- `MemoryStore` — in-memory, safe for concurrent use; suitable for tests and single-process apps
+- `FileStore` — one JSON file per session with atomic writes; suitable for simple local apps
+
+~~~go
+// In-memory (tests / dev)
+store := agent.NewMemoryStore()
+
+// File-backed (local apps)
+store, err := agent.NewFileStore("/path/to/sessions")
+~~~
+
+Both implement the `Store` interface, so you can swap them or provide your own:
+
+~~~go
+type Store interface {
+    Create(ctx context.Context, session *Session) error
+    Get(ctx context.Context, id string) (*Session, error)
+    Update(ctx context.Context, session *Session) error
+    Delete(ctx context.Context, id string) error
+    List(ctx context.Context, prefix string, limit int) ([]*Session, error)
+}
+~~~
+
+`Create` and `Update` are intentionally separate. `Create` returns `ErrSessionExists` if the ID is already present; `Update` returns `ErrSessionNotFound` if it is absent. Both errors work with `errors.Is`.
 
 ## Errors and retries
 
@@ -427,6 +495,9 @@ client, err := agent.New(agent.Config{
         MaxRetries:  5,
         InitialWait: time.Second,
         MaxWait:     30 * time.Second,
+        OnRetry:     func(attempt int, wait time.Duration) {
+            log.Printf("retry %d, waiting %s", attempt, wait)
+        },
     },
 })
 ~~~
@@ -497,7 +568,11 @@ agent/
   toolset.go                ToolBinding, Toolset, middleware
   parallel.go               Parallel[T]
   retry.go                  RetryConfig and retry helpers
+  stream.go                 StreamBuffer for retry-aware streaming
   errors.go                 typed errors
+  session.go                Session, Store interface, sentinel errors
+  session_memory.go         MemoryStore
+  session_file.go           FileStore
   mcp/                      MCP adapter
   tools/clock/              current time tool
   tools/math/               calculator tool
@@ -519,15 +594,16 @@ Completed foundation:
 - safe built-in clock/math/workspace tools
 - toolsets and middleware
 - explicit context management
-- basic assistant block
+- assistant block with hooks and streaming
 - MCP adapter
+- streaming retry helper (`StreamBuffer`, `RetryConfig.OnRetry`)
+- session persistence (`Session`, `Store`, `MemoryStore`, `FileStore`)
 
 Next focus:
 
-1. streaming retry helper and documentation
-2. recipe-style documentation
-3. repo explainer example app
-5. production helpers: sessions, durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
+1. recipe-style documentation
+2. repo explainer example app
+3. production helpers: durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
 
 See [`ROADMAP.md`](ROADMAP.md) for details.
 
