@@ -1,43 +1,25 @@
 # gocode
 
-`gocode` is a small Go library for LLM calls, tools, and agent loops.
+A small Go library for LLM calls, tools, and agent loops.
 
 > Plain data. Plain functions. No framework magic.
-
-It scales from one model call to practical tool-using assistants without forcing a framework-shaped runtime onto simple programs.
-
-The core promise:
-
+>
 > You own the data. You own the tools. You own the loop.
 
-`gocode` gives you:
+`gocode` scales from one model call to practical tool-using assistants without forcing a framework-shaped runtime onto simple programs.
 
-- model calls with `Ask` and `AskStream`
-- tool loops with `Loop` and `LoopStream`
-- plain `[]Message` conversation history
-- normal Go functions as tools
-- provider implementations for Anthropic, OpenAI, and OpenRouter
-- retries, typed errors, streaming, usage tracking, and tests
-- safe built-in tools, toolsets, middleware, context management, MCP, and a thin `Assistant` block
+It gives you:
+
+- `Ask` and `AskStream` for model calls
+- `Loop` and `LoopStream` for tool-using loops
+- plain `[]Message` history and normal Go functions as tools
+- providers for Anthropic, OpenAI, and OpenRouter
+- typed tools, schema helpers, toolsets, middleware, context management, MCP, and a thin `Assistant` block
+- safe built-in tools (clock, math, sandboxed workspace)
+- session persistence with a five-method `Store` interface
+- retries, typed errors, streaming, usage tracking
 
 Requires Go 1.21+. No external dependencies in the core package.
-
-## When to use it
-
-Use `gocode` when you want:
-
-- one-off LLM calls without ceremony
-- tool use without a heavyweight runtime
-- practical assistants with visible control flow
-- explicit conversation history and context management
-- easy testing through interfaces
-- Go-native code that is easy for humans and coding agents to inspect
-
-The project is not anti-convenience. It is anti-trap: helpers should compress boilerplate without hiding model calls, tool execution, memory mutation, persistence, or application lifecycle.
-
-Complex workflows are built with Go control flow, not hidden orchestration. Run loops in goroutines, compose outputs with normal function calls, and keep the data visible at every step.
-
-For the longer philosophy, see [`VISION.md`](VISION.md). For future work, see [`ROADMAP.md`](ROADMAP.md).
 
 ## Install
 
@@ -45,7 +27,7 @@ For the longer philosophy, see [`VISION.md`](VISION.md). For future work, see [`
 go get github.com/lukemuz/gocode/agent
 ~~~
 
-Set an API key for the provider you want to use:
+Set an API key for the provider you want:
 
 ~~~bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -53,11 +35,7 @@ export OPENAI_API_KEY=sk-...
 export OPENROUTER_API_KEY=sk-or-...
 ~~~
 
-## Quickstart
-
-For the guided first-run path, see [`QUICKSTART.md`](QUICKSTART.md).
-
-The smallest useful call looks like this:
+## The smallest useful call
 
 ~~~go
 client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
@@ -79,11 +57,13 @@ fmt.Println(agent.TextContent(reply))
 
 No hidden session. No runner. `history` is just data.
 
+For a step-by-step walkthrough see [`QUICKSTART.md`](QUICKSTART.md). For the design philosophy see [`VISION.md`](VISION.md). For an honest comparison with Google's ADK see [`COMPARISON.md`](COMPARISON.md).
+
 ## Core building blocks
 
 ### `Provider`
 
-A `Provider` translates between `gocode`'s canonical data model and an LLM API.
+A `Provider` translates between `gocode`'s data model and an LLM API.
 
 ~~~go
 type Provider interface {
@@ -92,17 +72,11 @@ type Provider interface {
 }
 ~~~
 
-Included providers:
-
-- Anthropic
-- OpenAI
-- OpenRouter
-
-You can implement this interface for any backend.
+Anthropic, OpenAI, and OpenRouter are included. Any backend can implement the interface.
 
 ### `Client`
 
-A `Client` holds provider, model, token limit, and retry configuration. It does not store conversation state.
+A `Client` holds provider, model, token limit, and retry config. It does not store conversation state, so the same client reuses across conversations, requests, jobs, and goroutines.
 
 ~~~go
 client, err := agent.New(agent.Config{
@@ -112,32 +86,20 @@ client, err := agent.New(agent.Config{
 })
 ~~~
 
-The same client can be reused across conversations, HTTP requests, jobs, and goroutines.
-
 ### `Message`
 
-Conversation history is plain data:
+Conversation history is plain data. Append replies yourself when you want to continue:
 
 ~~~go
-history := []agent.Message{
-    agent.NewUserMessage("Hello"),
-}
-~~~
+history := []agent.Message{agent.NewUserMessage("Hello")}
 
-Append replies yourself when you want to continue:
-
-~~~go
 reply, err := client.Ask(ctx, system, history)
-history = append(history, reply)
-history = append(history, agent.NewUserMessage("Tell me more."))
+history = append(history, reply, agent.NewUserMessage("Tell me more."))
 ~~~
 
 ### `Tool` and `ToolFunc`
 
-A tool has two parts:
-
-1. a model-facing definition
-2. a Go function your program runs
+A tool has two parts: a model-facing definition and a Go function.
 
 ~~~go
 tool, fn, err := agent.NewTypedTool(
@@ -154,30 +116,23 @@ tool, fn, err := agent.NewTypedTool(
 )
 ~~~
 
-Tools still compile down to ordinary values. A `Toolset` is just an ordered
-slice of `ToolBinding{Tool, Func, Meta}` you can build literally:
+Tools compile down to ordinary values. A `Toolset` is an ordered slice of `ToolBinding{Tool, Func, Meta}` you can build literally:
 
 ~~~go
-tools := agent.Toolset{Bindings: []agent.ToolBinding{
-    {Tool: tool, Func: fn},
-}}
+tools := agent.Toolset{Bindings: []agent.ToolBinding{{Tool: tool, Func: fn}}}
 ~~~
 
-There is no hidden registry.
+No hidden registry.
 
 ## Three usage tiers
 
 ### Tier 1: one model call
 
-Use `Ask` when you want one response.
-
 ~~~go
 reply, err := client.Ask(ctx, system, history)
 ~~~
 
-### Tier 2: parallel steps
-
-Use `Parallel` for independent fan-out/fan-in work.
+### Tier 2: parallel fan-out
 
 ~~~go
 results := agent.Parallel(ctx,
@@ -190,101 +145,19 @@ It uses goroutines. It is a helper, not a scheduler.
 
 ### Tier 3: tool loop
 
-Use `Loop` when the model can call tools.
-
 ~~~go
 result, err := client.Loop(ctx, system, history, tools, 5)
-if err != nil {
-    log.Fatal(err)
-}
-
 history = result.Messages
 fmt.Println(result.FinalText())
 ~~~
 
-`tools` is an `agent.Toolset` — see the assembly section below.
+`Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit. Multiple tool calls requested in one model turn run concurrently and return in original order.
 
-`Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit is reached.
-
-Multiple tool calls requested in the same model turn run concurrently and are returned to the model in the original order.
-
-### Composing loops
-
-Because `Ask`, `Loop`, and `Assistant.Step` are ordinary Go calls over plain data, they compose like any other functions. For example, you can run two independent tool-using loops at the same time, then feed their outputs into a later synthesis call.
-
-~~~go
-type SubagentOutput struct {
-    Name string
-    Text string
-}
-
-results := agent.Parallel(ctx,
-    func(ctx context.Context) (SubagentOutput, error) {
-        result, err := client.Loop(
-            ctx,
-            "You are a research assistant. Use your tools to gather facts.",
-            []agent.Message{agent.NewUserMessage(task)},
-            researchTools,
-            8,
-        )
-        if err != nil {
-            return SubagentOutput{}, err
-        }
-        return SubagentOutput{Name: "research", Text: result.FinalText()}, nil
-    },
-    func(ctx context.Context) (SubagentOutput, error) {
-        result, err := client.Loop(
-            ctx,
-            "You are an implementation assistant. Use your tools to inspect code.",
-            []agent.Message{agent.NewUserMessage(task)},
-            codeTools,
-            8,
-        )
-        if err != nil {
-            return SubagentOutput{}, err
-        }
-        return SubagentOutput{Name: "implementation", Text: result.FinalText()}, nil
-    },
-)
-
-for _, r := range results {
-    if r.Err != nil {
-        log.Fatal(r.Err)
-    }
-}
-
-synthesisHistory := []agent.Message{
-    agent.NewUserMessage(fmt.Sprintf(`Original task:
-
-%s
-
-Research output:
-
-%s
-
-Implementation output:
-
-%s
-
-Synthesize these into one final answer.`,
-        task,
-        results[0].Value.Text,
-        results[1].Value.Text,
-    )),
-}
-
-final, err := client.Ask(ctx, "You synthesize multiple agent outputs.", synthesisHistory)
-~~~
-
-The parallel branches can use different prompts, histories, tools, models, or clients. The synthesis step can be a simple `Ask`, as shown here, or another `Loop` if the synthesizer also needs tools.
+Because `Ask`, `Loop`, and `Assistant.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel, then synthesize their outputs with a later `Ask`.
 
 ## Practical assembly
 
-The primitive APIs remain available, but common agent assembly has helpers.
-
 ### Toolsets and middleware
-
-`Toolset` bundles tool definitions with their implementations and metadata.
 
 ~~~go
 toolset := agent.MustJoin(clockTool.Toolset(), workspaceToolset).Wrap(
@@ -296,40 +169,24 @@ toolset := agent.MustJoin(clockTool.Toolset(), workspaceToolset).Wrap(
 result, err := client.Loop(ctx, system, history, toolset, 10)
 ~~~
 
-Use `MustJoin` for static composition where a duplicate tool name is a
-programmer error. Use `Join` (which returns an error) when toolsets are
-combined dynamically.
+`MustJoin` is for static composition where a duplicate tool name is a programmer error. `Join` returns an error for dynamic composition.
 
-Available middleware:
-
-- `WithTimeout`
-- `WithResultLimit`
-- `WithLogging`
-- `WithPanicRecovery`
-- `WithConfirmation`
-
-Metadata is advisory and inspectable. Your application decides what policy to enforce.
+Available middleware: `WithTimeout`, `WithResultLimit`, `WithLogging`, `WithPanicRecovery`, `WithConfirmation`. Metadata is advisory; your application decides policy.
 
 ### Context management
 
-`ContextManager` trims history explicitly before a call or assistant step.
+`ContextManager` trims history explicitly before a call.
 
 ~~~go
-cm := agent.ContextManager{
-    MaxTokens:  8000,
-    KeepFirst:  1,
-    KeepRecent: 20,
-}
-
+cm := agent.ContextManager{MaxTokens: 8000, KeepFirst: 1, KeepRecent: 20}
 trimmed, err := cm.Trim(ctx, history)
-result, err := client.Loop(ctx, system, trimmed, tools, 10)
 ~~~
 
 The original history is not mutated. Tool-use/tool-result integrity is preserved. Summarization happens only if you configure a summarizer.
 
 ### Assistant
 
-`Assistant` is the blessed middle path: a thin block that wires together a client, system prompt, toolset, context manager, iteration limit, and hooks.
+`Assistant` is the blessed middle path: a thin block over a client, prompt, toolset, context manager, iteration limit, and hooks.
 
 ~~~go
 a := agent.Assistant{
@@ -339,66 +196,41 @@ a := agent.Assistant{
     Context: agent.ContextManager{MaxTokens: 8000, KeepRecent: 20},
     MaxIter: 10,
 }
-
 result, err := a.Step(ctx, history)
-history = result.Messages
 ~~~
 
-It is equivalent to:
-
-~~~go
-trimmed, err := a.Context.Trim(ctx, history)
-result, err := a.Client.Loop(ctx, a.System, trimmed, a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter)
-~~~
-
-No persistence, scheduler, runner, global registry, or hidden application lifecycle is introduced.
+Equivalent to `Trim` then `Loop`. No persistence, scheduler, runner, or hidden lifecycle.
 
 ## Built-in tools
-
-Built-ins are opt-in Lego blocks. They expose normal `agent.Tool`, `agent.ToolFunc`, and `agent.Toolset` values.
-
-Current packages:
 
 | Package | Tools |
 |---|---|
 | `agent/tools/clock` | current UTC time |
 | `agent/tools/math` | safe calculator |
-| `agent/tools/workspace` | sandboxed list, find, search, read, file info, and exact-string edit |
-
-Example:
+| `agent/tools/workspace` | sandboxed list, find, search, read, file info, exact-string edit |
 
 ~~~go
 clockTool := clock.New()
 ws, err := workspace.NewReadOnly(workspace.Config{Root: "."})
-if err != nil {
-    log.Fatal(err)
-}
-
 toolset := agent.MustJoin(clockTool.Toolset(), ws.Toolset())
 ~~~
 
-Use `workspace.NewReadOnly` for read-only filesystem access. Use `workspace.New` only when you want the `edit_file` tool, and consider wrapping it with `WithConfirmation`.
+`workspace.NewReadOnly` is read-only. `workspace.New` includes `edit_file` — wrap it with `WithConfirmation` before letting writes run.
 
 ## MCP
 
-`agent/mcp` adapts Model Context Protocol tools into ordinary `gocode` toolsets.
+`agent/mcp` adapts Model Context Protocol tools into ordinary toolsets.
 
 ~~~go
 srv, err := mcp.Connect(ctx, mcp.Config{Command: "my-mcp-server"})
-if err != nil {
-    log.Fatal(err)
-}
 defer srv.Close()
-
 mcpTools, err := srv.Toolset(ctx)
 result, err := client.Loop(ctx, system, history, mcpTools, 10)
 ~~~
 
-MCP support is explicit: you choose the server, inspect the tools, and pass them into the loop.
+You choose the server, inspect the tools, and pass them in.
 
 ## Streaming
-
-Use `AskStream` for one streamed response:
 
 ~~~go
 _, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) {
@@ -410,25 +242,20 @@ _, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) 
 
 Use `LoopStream` or `Assistant.StepStream` for streamed tool loops.
 
-Streaming callbacks fire synchronously as provider deltas arrive. Because retries can restart a stream after partial output, callbacks may see partial text from failed attempts before the successful attempt begins.
-
-Use `StreamBuffer` with `RetryConfig.OnRetry` to react to each retry and clear partial output:
+Retries can restart a stream after partial output, so callbacks may see partial text from failed attempts. Use `StreamBuffer` with `RetryConfig.OnRetry` to react and clear:
 
 ~~~go
 sb := agent.NewStreamBuffer(
-    func(b agent.ContentBlock) { fmt.Print(b.Text) }, // forward tokens live
-    func() { fmt.Print("\n[retrying…]\n") },           // clear on retry
+    func(b agent.ContentBlock) { fmt.Print(b.Text) },
+    func() { fmt.Print("\n[retrying…]\n") },
 )
-cfg := agent.RetryConfig{OnRetry: sb.OnRetry}
-client, _ := agent.New(agent.Config{..., Retry: cfg})
+client, _ := agent.New(agent.Config{..., Retry: agent.RetryConfig{OnRetry: sb.OnRetry}})
 msg, err := client.AskStream(ctx, system, history, sb.OnToken)
 ~~~
 
-Both callbacks may be nil. `OnRetry` also receives the 1-based retry attempt number and the computed backoff duration, which you can use for logging.
-
 ## Sessions
 
-`Session` is plain data — it does not call models, run tools, or trim context. You load it, pass `History` to a model call, and persist the updated result yourself.
+`Session` is plain data. You load it, pass `History` to a model call, and persist the result yourself.
 
 ~~~go
 sess, err := store.Get(ctx, sessionID)
@@ -445,7 +272,6 @@ if err != nil {
 }
 sess.History = result.Messages
 
-// Create on first use; Update on subsequent calls.
 if len(sess.History) == 1 {
     err = store.Create(ctx, sess)
 } else {
@@ -453,20 +279,7 @@ if len(sess.History) == 1 {
 }
 ~~~
 
-Two built-in stores:
-
-- `MemoryStore` — in-memory, safe for concurrent use; suitable for tests and single-process apps
-- `FileStore` — one JSON file per session with atomic writes; suitable for simple local apps
-
-~~~go
-// In-memory (tests / dev)
-store := agent.NewMemoryStore()
-
-// File-backed (local apps)
-store, err := agent.NewFileStore("/path/to/sessions")
-~~~
-
-Both implement the `Store` interface, so you can swap them or provide your own:
+Two built-in stores: `MemoryStore` (in-memory, concurrent-safe) and `FileStore` (one JSON file per session, atomic writes). Both implement:
 
 ~~~go
 type Store interface {
@@ -478,11 +291,9 @@ type Store interface {
 }
 ~~~
 
-`Create` and `Update` are intentionally separate. `Create` returns `ErrSessionExists` if the ID is already present; `Update` returns `ErrSessionNotFound` if it is absent. Both errors work with `errors.Is`.
+`Create` returns `ErrSessionExists`; `Update` returns `ErrSessionNotFound`. Both work with `errors.Is`.
 
 ## Errors and retries
-
-Retries are built in for transient API failures such as rate limits, temporary network errors, and 5xx responses.
 
 ~~~go
 client, err := agent.New(agent.Config{
@@ -493,131 +304,49 @@ client, err := agent.New(agent.Config{
         MaxRetries:  5,
         InitialWait: time.Second,
         MaxWait:     30 * time.Second,
-        OnRetry:     func(attempt int, wait time.Duration) {
+        OnRetry: func(attempt int, wait time.Duration) {
             log.Printf("retry %d, waiting %s", attempt, wait)
         },
     },
 })
 ~~~
 
-Errors are typed and work with `errors.Is` and `errors.As`.
+Errors are typed and work with `errors.Is` / `errors.As`: `APIError`, `ToolError`, `LoopError`, `RetryExhaustedError`, `ErrMissingTool`, `ErrMaxIter`.
 
-Common cases:
-
-- `APIError`
-- `ToolError`
-- `LoopError`
-- `RetryExhaustedError`
-- `ErrMissingTool`
-- `ErrMaxIter`
-
-Tool execution errors are soft by default: the error is sent back to the model as a tool result with `IsError: true`. Missing tools are treated as configuration errors.
+Tool execution errors are soft by default: the error returns to the model as a tool result with `IsError: true`. Missing tools are configuration errors.
 
 ## Testing
 
-The `Provider` interface is the main testing seam. You can test calls, loops, streaming behavior, tool execution, history shape, usage accounting, and errors without real API calls.
-
-Run tests:
+The `Provider` interface is the main testing seam. You can test calls, loops, streaming, tool execution, history shape, usage, and errors without real API calls.
 
 ~~~bash
 go test ./agent/...
 ~~~
 
-Good tests usually assert contracts rather than exact LLM prose:
-
-- messages appended in the expected order
-- tool calls produce expected tool results
-- errors match with `errors.Is` and `errors.As`
-- callbacks fire in expected order
-- usage is accumulated
-- partial history is inspectable on failure
+Good tests assert contracts (message order, tool calls, error types, callback order, usage accumulation), not exact LLM prose.
 
 ## Examples
 
+Smaller examples in `examples/`:
+
 ~~~bash
-# Single model call
-go run ./examples/ask
-
-# Parallel and sequential composition
-go run ./examples/pipeline
-
-# Tool-using loop
-go run ./examples/agent
-
-# Streaming output
-go run ./examples/stream
+go run ./examples/ask        # one model call
+go run ./examples/pipeline   # parallel + sequential composition
+go run ./examples/agent      # tool-using loop
+go run ./examples/stream     # streaming
 ~~~
+
+Larger runnable patterns in `examples/recipes/`:
+
+- `01-assistant-with-tools` — curated toolset, middleware, context management
+- `02-repo-explainer` — sandboxed workspace tools, streaming, file-backed sessions
+- `04-router-subagents` — orchestrator delegates to specialist subagents
+- `05-persistent-chat` — long-running conversation with `FileStore`
 
 Set the relevant API key first.
 
-## Package layout
-
-~~~text
-agent/
-  agent.go                  Client, Ask, AskStream, Loop, LoopStream, Config
-  assistant.go              Assistant, Hooks
-  context.go                ContextManager
-  provider.go               Provider, ProviderRequest, ProviderResponse
-  anthropic.go              Anthropic provider and env helpers
-  openai.go                 OpenAI provider and env helpers
-  openrouter.go             OpenRouter provider and env helpers
-  message.go                Message, ContentBlock, helpers
-  tool.go                   Tool, ToolFunc, typed tools, schema helpers
-  toolset.go                ToolBinding, Toolset, middleware
-  parallel.go               Parallel[T]
-  retry.go                  RetryConfig and retry helpers
-  stream.go                 StreamBuffer for retry-aware streaming
-  errors.go                 typed errors
-  session.go                Session, Store interface, sentinel errors
-  session_memory.go         MemoryStore
-  session_file.go           FileStore
-  mcp/                      MCP adapter
-  tools/clock/              current time tool
-  tools/math/               calculator tool
-  tools/workspace/          sandboxed workspace tools
-examples/
-  ask/
-  pipeline/
-  agent/
-  stream/
-~~~
-
-## Roadmap summary
-
-Completed foundation:
-
-- providers, core model calls, tool loops, streaming, retries, typed errors
-- parallel tool execution
-- typed tool helpers and schema builders
-- safe built-in clock/math/workspace tools
-- toolsets and middleware
-- explicit context management
-- assistant block with hooks and streaming
-- MCP adapter
-- streaming retry helper (`StreamBuffer`, `RetryConfig.OnRetry`)
-- session persistence (`Session`, `Store`, `MemoryStore`, `FileStore`)
-
-Next focus:
-
-1. recipe-style documentation
-2. repo explainer example app
-3. production helpers: durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
-
-See [`ROADMAP.md`](ROADMAP.md) for details.
-
 ## Non-goals
 
-`gocode` should not become:
+`gocode` will not become a graph executor, visual workflow builder, managed agent platform, no-code configurator, hidden scheduler, deployment framework, vector database, global tool registry, or cross-session memory platform in core. Higher-level systems can be built on top.
 
-- a graph executor
-- a visual workflow builder
-- a managed agent platform
-- a no-code agent configuration system
-- a hidden scheduler
-- a deployment framework
-- a vector database
-- a global tool registry
-- a cross-session memory platform in the core package
-- a replacement for your application architecture
-
-Higher-level systems can be built on top of `gocode`. The library itself should remain small, explicit, composable, and easy to reason about.
+See [`ROADMAP.md`](ROADMAP.md) for forward-looking work.
