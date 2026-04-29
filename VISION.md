@@ -25,7 +25,7 @@ The library should feel like Go: plain structs, plain functions, explicit errors
 ## Layers
 
 1. **Primitives** — `Client`, `Provider`, `Message`, `Tool`, `Ask`, `Loop`, streaming, retries, typed errors.
-2. **Assembly** — typed tools, schema helpers, toolsets, middleware, context managers, the `Assistant` block, hooks.
+2. **Assembly** — typed tools, schema helpers, toolsets, middleware, context managers, the `Agent` block, hooks.
 3. **Recipes** — runnable patterns under `examples/recipes/`.
 
 Each layer should be useful on its own. No layer should force concepts from a later one.
@@ -38,13 +38,15 @@ A good helper compresses repetitive glue, has obvious behavior, exposes the prim
 
 The enemy is not the word "framework." The enemy is forcing every user into the same application model.
 
-## The Assistant block
+## The Agent block
 
-A practical assistant typically wants a client, a system prompt, a toolset, a context budget, optional summarization, an iteration cap, optional hooks, and caller-owned history. Hand-wiring that every time is tedious.
+A practical tool-using agent typically wants a client, a system prompt, a toolset, a context budget, optional summarization, an iteration cap, optional hooks, and caller-owned history. Hand-wiring that every time is tedious.
 
-`Assistant` does exactly that wiring and nothing else: trim history if configured, call `Loop`, return the result. It does not own persistence, scheduling, deployment, or background work.
+`Agent` does exactly that wiring and nothing else: trim history before each model call if a `ContextManager` is configured, run the tool-use loop, return the result. It does not own persistence, scheduling, deployment, or background work.
 
 > An assembled primitive, not an application runner.
+
+A one-shot autonomous task is a single `Agent.Step` call with the goal as the user message; a multi-turn conversation is one `Step` per human turn, threading history. Same struct, same method, no extra vocabulary.
 
 ## Context, tools, and subagents
 

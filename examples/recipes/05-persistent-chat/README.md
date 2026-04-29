@@ -44,7 +44,7 @@ document you can `cat`, `jq`, diff, or hand-edit.
 - `agent.Load`, `agent.Save` (open-or-create / upsert convenience)
 - `agent.Recorder` interface + `agent.RecorderToSession`
 - `agent.Event` and the `EventType` constants
-- `agent.Assistant` driving the turn
+- `agent.Agent` driving the turn
 - Built-in tools: `agent/tools/math`
 
 ## ADK comparison

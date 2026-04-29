@@ -122,8 +122,8 @@ func main() {
 		},
 	}
 
-	// 4. Assistant assembly.
-	a := agent.Assistant{
+	// 4. Agent assembly.
+	a := agent.Agent{
 		Client: smart,
 		System: "You are a code archaeologist. Use your tools to investigate the " +
 			"repository before answering. Cite specific files and line numbers. " +

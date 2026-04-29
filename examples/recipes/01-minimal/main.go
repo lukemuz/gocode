@@ -1,9 +1,9 @@
 // Recipe 01-minimal: the smallest tool-using agent gocode can express
 // with primitives alone. No streaming, no middleware, no context manager,
-// no Assistant. Just Client + tools + Loop.
+// no Agent block. Just Client + tools + Loop.
 //
 // This recipe exists as a baseline: how short can a useful agent be
-// before any helpers are added? See 01-assistant-with-tools for the
+// before any helpers are added? See 01-agent-with-tools for the
 // production-shaped version that layers retries, streaming, middleware,
 // and context management on top of the same primitives.
 //

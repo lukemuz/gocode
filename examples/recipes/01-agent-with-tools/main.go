@@ -1,7 +1,7 @@
-// Recipe 01: a single Assistant with a curated toolset and streaming output.
+// Recipe 01: a single Agent with a curated toolset and streaming output.
 //
 // This is the entry-point recipe: the smallest "I'm building a real thing"
-// example. It shows the practical assembly path — Assistant + Toolset +
+// example. It shows the practical assembly path — Agent + Toolset +
 // middleware + ContextManager + streaming with retry-aware buffering —
 // without subagents, persistence, or HTTP. Each later recipe adds one
 // dimension to this base.
@@ -9,7 +9,7 @@
 // Run:
 //
 //	export ANTHROPIC_API_KEY=sk-ant-...
-//	go run ./examples/recipes/01-assistant-with-tools "What time is it, and what is 17 * 23?"
+//	go run ./examples/recipes/01-agent-with-tools "What time is it, and what is 17 * 23?"
 package main
 
 import (
@@ -34,7 +34,7 @@ func main() {
 
 	question := strings.TrimSpace(strings.Join(flag.Args(), " "))
 	if question == "" {
-		log.Fatal("usage: assistant-with-tools [-dir PATH] \"your question\"")
+		log.Fatal("usage: agent-with-tools [-dir PATH] \"your question\"")
 	}
 
 	ctx := context.Background()
@@ -100,7 +100,7 @@ func main() {
 	//
 	// For a one-shot question this is essentially a no-op (history fits in
 	// budget), but configuring it now keeps the recipe honest about what a
-	// real long-running assistant needs. KeepFirst pins the user's original
+	// real long-running agent needs. KeepFirst pins the user's original
 	// task; KeepRecent always preserves the recent tool cycle.
 	cm := agent.ContextManager{
 		MaxTokens:  16000,
@@ -108,8 +108,8 @@ func main() {
 		KeepRecent: 20,
 	}
 
-	// 5. Assistant assembly.
-	a := agent.Assistant{
+	// 5. Agent assembly.
+	a := agent.Agent{
 		Client:  client,
 		System:  "You are a concise helper. Use your tools when they would give a more accurate answer than guessing.",
 		Tools:   tools,

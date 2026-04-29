@@ -87,7 +87,7 @@ func main() {
 		2,
 	)
 
-	orchestrator := agent.Assistant{
+	orchestrator := agent.Agent{
 		Client: smart,
 		System: "You are an orchestrator. You have two specialists available as tools: " +
 			"`research` (can inspect the project directory) and `write` (turns notes into prose). " +

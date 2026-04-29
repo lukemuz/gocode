@@ -1,12 +1,12 @@
-# Recipe 01: assistant with tools
+# Recipe 01: agent with tools
 
 The entry-point recipe. Smallest possible "I'm building a real thing"
-example: an `Assistant` with a curated toolset, middleware, context
+example: an `Agent` with a curated toolset, middleware, context
 management, and streamed output.
 
 ## What this shows
 
-- `agent.Assistant` as the assembly point — a thin block that ties together
+- `agent.Agent` as the assembly point — a thin block that ties together
   client, system prompt, toolset, context manager, and iteration cap
 - Built-in tools composed with `agent.Join`: clock + math + read-only
   workspace
@@ -25,14 +25,14 @@ dimension on top of this base.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-go run ./examples/recipes/01-assistant-with-tools "What time is it, and what is 17 * 23?"
-go run ./examples/recipes/01-assistant-with-tools -dir . "How many .go files are in this directory tree?"
+go run ./examples/recipes/01-agent-with-tools "What time is it, and what is 17 * 23?"
+go run ./examples/recipes/01-agent-with-tools -dir . "How many .go files are in this directory tree?"
 ```
 
 ## Library features exercised
 
 - `agent.New`, `agent.Config`, `agent.RetryConfig`
-- `agent.Assistant`, `Assistant.StepStream`
+- `agent.Agent`, `Agent.StepStream`
 - `agent.Join`, `Toolset.Wrap`
 - `agent.WithTimeout`, `agent.WithResultLimit`, `agent.WithLogging`
 - `agent.ContextManager`

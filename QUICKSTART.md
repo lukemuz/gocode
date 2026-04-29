@@ -174,12 +174,12 @@ tools := agent.MustJoin(clockTool.Toolset(), ws.Toolset()).Wrap(
 
 Use `workspace.NewReadOnly` for safe filesystem reads. `workspace.New` includes `edit_file` — wrap it with `agent.WithConfirmation` before letting writes run.
 
-## 6. Use Assistant when the glue repeats
+## 6. Use Agent when the glue repeats
 
-`Assistant` bundles a client, system prompt, toolset, context manager, and iteration cap.
+`Agent` bundles a client, system prompt, toolset, context manager, and iteration cap.
 
 ~~~go
-a := agent.Assistant{
+a := agent.Agent{
     Client:  client,
     System:  "You are a helpful assistant.",
     Tools:   tools,
@@ -187,20 +187,19 @@ a := agent.Assistant{
     MaxIter: 10,
 }
 
-result, err := a.Step(ctx, history)
+// One-shot autonomous task: pass a single user message with the goal.
+result, err := a.Step(ctx, []agent.Message{agent.NewUserMessage("do the thing")})
+
+// Multi-turn: call Step once per human turn and thread history.
+result, err = a.Step(ctx, history)
 history = result.Messages
 ~~~
 
-It is equivalent to:
-
-~~~go
-trimmed, _ := a.Context.Trim(ctx, history)
-result, _ := client.Loop(ctx, a.System, trimmed, a.Tools, a.MaxIter)
-~~~
+`Agent.Step` trims history once up front and again before every model call inside the loop (when a `ContextManager` is configured), so long autonomous runs do not silently blow the context window. The primitives `Loop` and `ContextManager.Trim` remain available if you want a different policy.
 
 No persistence, runner, scheduler, or hidden lifecycle.
 
-## Ask vs Loop vs Extract vs Assistant
+## Ask vs Loop vs Extract vs Agent
 
 | Need | Use |
 |---|---|
@@ -209,7 +208,7 @@ No persistence, runner, scheduler, or hidden lifecycle.
 | Model can call tools | `Loop` |
 | Streaming tool loop | `LoopStream` |
 | Typed value back (with or without tools) | `Extract[T]` |
-| Repeated assistant glue | `Assistant.Step` / `Assistant.StepStream` |
+| Repeated agent glue | `Agent.Step` / `Agent.StepStream` |
 | Independent fan-out | `Parallel` |
 
 ## Next steps
