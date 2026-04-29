@@ -226,25 +226,45 @@ func (c *Client) LoopStream(
 	return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: maxIter, Cause: ErrMaxIter}
 }
 
-// runTools executes all tool_use blocks in content and returns their results.
-// Individual tool errors become is_error=true results so the model can see
-// and recover from them. Only a missing-tool lookup causes a hard abort.
+// runTools executes all tool_use blocks in content concurrently and returns
+// their results in the original order. Individual tool errors become
+// is_error=true results so the model can see and recover from them. A missing
+// tool is a programming error (wrong dispatch map) and aborts before any
+// goroutines are spawned.
 func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]ToolFunc) ([]ToolResult, error) {
 	uses := extractToolUses(content)
-	results := make([]ToolResult, len(uses))
-	for i, use := range uses {
-		fn, ok := dispatch[use.Name]
-		if !ok {
+
+	// Validate all names up front so a missing tool aborts immediately rather
+	// than after other calls have already started.
+	for _, use := range uses {
+		if _, ok := dispatch[use.Name]; !ok {
 			return nil, &ToolError{ToolName: use.Name, ToolUseID: use.ID, Cause: ErrMissingTool}
 		}
-		output, err := fn(ctx, use.Input)
-		results[i] = ToolResult{ToolUseID: use.ID}
-		if err != nil {
-			results[i].Content = err.Error()
-			results[i].IsError = true
-		} else {
-			results[i].Content = output
-		}
+	}
+
+	type indexed struct {
+		i      int
+		result ToolResult
+	}
+	ch := make(chan indexed, len(uses))
+	for i, use := range uses {
+		i, use := i, use
+		go func() {
+			output, err := dispatch[use.Name](ctx, use.Input)
+			r := ToolResult{ToolUseID: use.ID}
+			if err != nil {
+				r.Content = err.Error()
+				r.IsError = true
+			} else {
+				r.Content = output
+			}
+			ch <- indexed{i: i, result: r}
+		}()
+	}
+	results := make([]ToolResult, len(uses))
+	for range uses {
+		it := <-ch
+		results[it.i] = it.result
 	}
 	return results, nil
 }

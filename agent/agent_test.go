@@ -414,6 +414,94 @@ func TestRunTools(t *testing.T) {
 			t.Errorf("unexpected ToolError: %+v", te)
 		}
 	})
+
+	t.Run("multiple tools preserve index order", func(t *testing.T) {
+		// "slow" completes after "fast" to verify results are ordered by
+		// original position, not completion order.
+		ordered := map[string]ToolFunc{
+			"slow": func(_ context.Context, _ json.RawMessage) (string, error) {
+				time.Sleep(20 * time.Millisecond)
+				return "slow-result", nil
+			},
+			"fast": func(_ context.Context, _ json.RawMessage) (string, error) {
+				return "fast-result", nil
+			},
+		}
+		content := []ContentBlock{
+			{Type: TypeToolUse, ID: "tu_slow", Name: "slow"},
+			{Type: TypeToolUse, ID: "tu_fast", Name: "fast"},
+		}
+		results, err := runTools(ctx, content, ordered)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+		if results[0].ToolUseID != "tu_slow" || results[0].Content != "slow-result" {
+			t.Errorf("results[0] wrong: %+v", results[0])
+		}
+		if results[1].ToolUseID != "tu_fast" || results[1].Content != "fast-result" {
+			t.Errorf("results[1] wrong: %+v", results[1])
+		}
+	})
+
+	t.Run("multiple tools run concurrently", func(t *testing.T) {
+		const sleep = 50 * time.Millisecond
+		slow2 := map[string]ToolFunc{
+			"a": func(_ context.Context, _ json.RawMessage) (string, error) {
+				time.Sleep(sleep)
+				return "a", nil
+			},
+			"b": func(_ context.Context, _ json.RawMessage) (string, error) {
+				time.Sleep(sleep)
+				return "b", nil
+			},
+		}
+		content := []ContentBlock{
+			{Type: TypeToolUse, ID: "tu_a", Name: "a"},
+			{Type: TypeToolUse, ID: "tu_b", Name: "b"},
+		}
+		start := time.Now()
+		results, err := runTools(ctx, content, slow2)
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Concurrent execution finishes in ~sleep; sequential would take ~2*sleep.
+		if elapsed >= 2*sleep {
+			t.Errorf("tools appear to have run sequentially (elapsed %v >= 2*%v)", elapsed, sleep)
+		}
+		if results[0].Content != "a" || results[1].Content != "b" {
+			t.Errorf("unexpected results: %+v", results)
+		}
+	})
+
+	t.Run("missing tool among multiple aborts before goroutines start", func(t *testing.T) {
+		var called bool
+		mixedDispatch := map[string]ToolFunc{
+			"echo": func(_ context.Context, input json.RawMessage) (string, error) {
+				called = true
+				return string(input), nil
+			},
+		}
+		content := []ContentBlock{
+			{Type: TypeToolUse, ID: "tu_1", Name: "echo"},
+			{Type: TypeToolUse, ID: "tu_missing", Name: "not_registered"},
+			{Type: TypeToolUse, ID: "tu_2", Name: "echo"},
+		}
+		_, err := runTools(ctx, content, mixedDispatch)
+		if err == nil {
+			t.Fatal("expected error for missing tool")
+		}
+		var te *ToolError
+		if !errors.As(err, &te) || te.ToolName != "not_registered" {
+			t.Errorf("expected ToolError for 'not_registered', got %v", err)
+		}
+		if called {
+			t.Error("registered tools should not have been called when validation fails")
+		}
+	})
 }
 
 func TestParallel(t *testing.T) {
