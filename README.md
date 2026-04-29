@@ -73,7 +73,7 @@ type Provider interface {
 }
 ~~~
 
-Anthropic, OpenAI, and OpenRouter are included. Any backend can implement the interface.
+Anthropic, OpenAI Chat Completions, OpenAI Responses, and OpenRouter are included. Any backend can implement the interface.
 
 ### `Client`
 
@@ -252,18 +252,27 @@ toolset := agent.MustJoin(clockTool.Toolset(), ws.Toolset())
 
 Some tools live on the provider side: Anthropic and OpenAI ship a set of tools the model is already trained to use. They split into two shapes.
 
-**Server-executed (category 1):** the provider runs the tool and returns the result inline — `web_search`, `code_execution`. There is no Go function to write. Attach them via `ProviderTools`:
+**Server-executed (category 1):** the provider runs the tool and returns the result inline. There is no Go function to write. Attach via `ProviderTools`:
 
 ~~~go
+// Anthropic — works against the standard Messages API.
 toolset := agent.Tools(myLocalBinding).
     WithProviderTools(
         agent.AnthropicWebSearch(agent.WebSearchOpts{MaxUses: 3}),
         agent.AnthropicCodeExecution(),
     )
-result, err := client.Loop(ctx, system, history, toolset, 10)
+
+// OpenAI Responses — needs the OpenAIResponsesProvider (see below).
+toolset := agent.Tools(myLocalBinding).
+    WithProviderTools(
+        agent.OpenAIWebSearch(),
+        agent.OpenAICodeInterpreter(agent.OpenAICodeInterpreterOpts{}),
+        agent.OpenAIFileSearch(agent.OpenAIFileSearchOpts{VectorStoreIDs: []string{"vs_..."}}),
+        agent.OpenAIImageGeneration(),
+    )
 ~~~
 
-The agent loop never dispatches these — when the model uses them the response carries `server_tool_use` and `*_tool_result` content blocks, which round-trip verbatim via `ContentBlock.Raw`.
+The agent loop never dispatches these — the response carries provider-specific result items (`server_tool_use`, `web_search_call`, `code_interpreter_call`, …) that round-trip verbatim via `ContentBlock.Raw`.
 
 **Provider-defined schema, you execute (category 2):** the model has been trained on the tool's name and arguments, but you supply the runtime — `bash`, `text_editor`, `computer`. The wire declaration is `{type, name}` instead of `{name, description, input_schema}`, and the dispatch flow is identical to a normal tool. Constructors return ordinary `ToolBinding`s:
 
@@ -274,7 +283,9 @@ bash := agent.AnthropicBashTool(func(ctx context.Context, in json.RawMessage) (s
 toolset := agent.Tools(bash).Wrap(agent.WithConfirmation(promptUser))
 ~~~
 
-Both flavors are tagged for one provider; passing them to a different one fails at request build with a clear error. OpenAI Chat Completions does not expose hosted tools — for `web_search`/`file_search`/`code_interpreter` you'll need a Responses-API provider, which is not part of this release.
+Tools and `ProviderTool`s are tagged for one provider; passing them to a different one fails at request build with a clear error.
+
+**OpenAI: Chat Completions vs. Responses.** Hosted tools (`web_search`, `file_search`, `code_interpreter`, `image_generation`) live on `/v1/responses`, not `/v1/chat/completions`. Use `agent.NewOpenAIResponsesClientFromEnv(model)` (or build one from `NewOpenAIResponsesProvider`) when you want them. Plain function calling works on both endpoints; OpenAI has signaled Responses as the path forward, so prefer it for new code.
 
 ## MCP
 
