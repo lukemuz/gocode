@@ -11,7 +11,7 @@ interface, and a `Recorder` captures intermediate turn activity into
 - **Read-modify-write** turn loop:
   ```go
   sess.History = append(sess.History, agent.NewUserMessage(input))
-  result, err := assistant.Step(ctx, sess.History)
+  result, err := a.Step(ctx, sess.History)
   // failed turn → sess.History unchanged → next attempt starts from the same place
   sess.History = result.Messages
   agent.Save(ctx, store, sess)

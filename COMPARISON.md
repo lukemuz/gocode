@@ -124,7 +124,7 @@ if errors.Is(err, agent.ErrSessionNotFound) {
 }
 
 sess.History = append(sess.History, agent.NewUserMessage(userInput))
-result, err := assistant.Step(ctx, sess.History)
+result, err := a.Step(ctx, sess.History)
 if err != nil {
     return err // sess unchanged; retry is just calling again
 }
