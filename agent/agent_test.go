@@ -367,7 +367,7 @@ func TestRunTools(t *testing.T) {
 				Input: json.RawMessage(`"hello"`),
 			},
 		}
-		results, err := runTools(ctx, content, dispatch)
+		results, err := runTools(ctx, content, dispatch, nil, "", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -385,7 +385,7 @@ func TestRunTools(t *testing.T) {
 				Input: json.RawMessage(`{}`),
 			},
 		}
-		results, err := runTools(ctx, content, dispatch)
+		results, err := runTools(ctx, content, dispatch, nil, "", 0)
 		if err != nil {
 			t.Fatal("runTools should not return error for tool execution failures")
 		}
@@ -402,7 +402,7 @@ func TestRunTools(t *testing.T) {
 				Name: "missing_tool",
 			},
 		}
-		_, err := runTools(ctx, content, dispatch)
+		_, err := runTools(ctx, content, dispatch, nil, "", 0)
 		if err == nil {
 			t.Fatal("expected error for missing tool")
 		}
@@ -431,7 +431,7 @@ func TestRunTools(t *testing.T) {
 			{Type: TypeToolUse, ID: "tu_slow", Name: "slow"},
 			{Type: TypeToolUse, ID: "tu_fast", Name: "fast"},
 		}
-		results, err := runTools(ctx, content, ordered)
+		results, err := runTools(ctx, content, ordered, nil, "", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -463,7 +463,7 @@ func TestRunTools(t *testing.T) {
 			{Type: TypeToolUse, ID: "tu_b", Name: "b"},
 		}
 		start := time.Now()
-		results, err := runTools(ctx, content, slow2)
+		results, err := runTools(ctx, content, slow2, nil, "", 0)
 		elapsed := time.Since(start)
 		if err != nil {
 			t.Fatal(err)
@@ -490,7 +490,7 @@ func TestRunTools(t *testing.T) {
 			{Type: TypeToolUse, ID: "tu_missing", Name: "not_registered"},
 			{Type: TypeToolUse, ID: "tu_2", Name: "echo"},
 		}
-		_, err := runTools(ctx, content, mixedDispatch)
+		_, err := runTools(ctx, content, mixedDispatch, nil, "", 0)
 		if err == nil {
 			t.Fatal("expected error for missing tool")
 		}

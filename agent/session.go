@@ -47,6 +47,12 @@ type Session struct {
 	ID      string                     `json:"id"`
 	History []Message                  `json:"history,omitempty"`
 	State   map[string]json.RawMessage `json:"state,omitempty"`
+
+	// Events is an append-only activity log populated when a Recorder is
+	// attached to the session via RecorderToSession. It records intermediate
+	// turn activity — model calls, tool calls, retries — that does not
+	// appear in History. Persisted by Store implementations as plain JSON.
+	Events []Event `json:"events,omitempty"`
 }
 
 // SetState marshals val as JSON and stores it under key in s.State.
@@ -191,6 +197,21 @@ func cloneSession(s *Session) *Session {
 			cv := make(json.RawMessage, len(v))
 			copy(cv, v)
 			c.State[k] = cv
+		}
+	}
+	if len(s.Events) > 0 {
+		c.Events = make([]Event, len(s.Events))
+		for i, ev := range s.Events {
+			ne := ev
+			if len(ev.History) > 0 {
+				ne.History = make([]Message, len(ev.History))
+				copy(ne.History, ev.History)
+			}
+			if len(ev.ToolInput) > 0 {
+				ne.ToolInput = make(json.RawMessage, len(ev.ToolInput))
+				copy(ne.ToolInput, ev.ToolInput)
+			}
+			c.Events[i] = ne
 		}
 	}
 	return c

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // Config holds everything needed to create a Client.
@@ -11,6 +12,13 @@ type Config struct {
 	Model     string      // required — provider-specific model identifier
 	MaxTokens int         // max tokens per response; defaults to 1024
 	Retry     RetryConfig // controls automatic retry behaviour for transient API errors
+
+	// Recorder, if non-nil, receives Events as Loop / LoopStream runs:
+	// turn start/end, model request/response, retry attempts, and tool
+	// call start/end. See recorder.go for event semantics. Recording is
+	// best-effort and must not block the loop; implementations should be
+	// fast and non-blocking. Ask and AskStream do not emit events.
+	Recorder Recorder
 }
 
 // Well-known Anthropic model identifiers.
@@ -52,6 +60,15 @@ func New(cfg Config) (*Client, error) {
 func (c *Client) WithModel(model string) *Client {
 	cfg := c.cfg
 	cfg.Model = model
+	return &Client{cfg: cfg}
+}
+
+// WithRecorder returns a new Client that shares the rest of c's config but
+// replaces the Recorder. Pass nil to disable recording on the derived Client.
+// The returned Client is independent of c.
+func (c *Client) WithRecorder(rec Recorder) *Client {
+	cfg := c.cfg
+	cfg.Recorder = rec
 	return &Client{cfg: cfg}
 }
 
@@ -153,6 +170,13 @@ func (c *Client) Loop(
 	copy(msgs, history)
 	var total Usage
 
+	rec := c.cfg.Recorder
+	turnID := ""
+	if rec != nil {
+		turnID = newTurnID()
+		emit(ctx, rec, Event{TurnID: turnID, Type: EventTurnStart, History: msgs})
+	}
+
 	for iter := 0; maxIter == 0 || iter < maxIter; iter++ {
 		req := ProviderRequest{
 			Model:     c.cfg.Model,
@@ -161,41 +185,72 @@ func (c *Client) Loop(
 			Messages:  msgs,
 			Tools:     toolDefs,
 		}
-		resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
+		emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventModelRequest})
+		resp, err := callWithRetry(ctx, retryWithRecorder(c.cfg.Retry, rec, ctx, turnID, iter), func() (ProviderResponse, error) {
 			return c.cfg.Provider.Call(ctx, req)
 		})
 		if err != nil {
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: err.Error()})
 			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
 		}
 		total.InputTokens += resp.Usage.InputTokens
 		total.OutputTokens += resp.Usage.OutputTokens
-		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Content})
+		assistantMsg := Message{Role: RoleAssistant, Content: resp.Content}
+		msgs = append(msgs, assistantMsg)
+		if rec != nil {
+			usage := resp.Usage
+			emit(ctx, rec, Event{
+				TurnID: turnID, Iter: iter, Type: EventModelResponse,
+				Message: &assistantMsg, Usage: &usage, StopReason: resp.StopReason,
+			})
+		}
 
 		switch resp.StopReason {
 		case "end_turn":
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnEnd, Usage: &total})
 			return LoopResult{Messages: msgs, Usage: total}, nil
 
 		case "tool_use":
-			results, err := runTools(ctx, resp.Content, dispatch)
+			results, err := runTools(ctx, resp.Content, dispatch, rec, turnID, iter)
 			if err != nil {
+				emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: err.Error()})
 				return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
 			}
 			msgs = append(msgs, NewToolResultMessage(results))
 
 		case "max_tokens":
-			return LoopResult{Messages: msgs, Usage: total}, &LoopError{
-				Iter:  iter,
-				Cause: fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens"),
-			}
+			cause := fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens")
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: cause.Error()})
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: cause}
 
 		default:
-			return LoopResult{Messages: msgs, Usage: total}, &LoopError{
-				Iter:  iter,
-				Cause: fmt.Errorf("unexpected stop_reason %q", resp.StopReason),
-			}
+			cause := fmt.Errorf("unexpected stop_reason %q", resp.StopReason)
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: cause.Error()})
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: cause}
 		}
 	}
+	emit(ctx, rec, Event{TurnID: turnID, Iter: maxIter, Type: EventTurnError, Err: ErrMaxIter.Error()})
 	return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: maxIter, Cause: ErrMaxIter}
+}
+
+// retryWithRecorder returns a copy of cfg whose OnRetry callback also emits a
+// RetryAttempt event into rec. The user's existing OnRetry, if any, is still
+// invoked. cfg is unchanged.
+func retryWithRecorder(cfg RetryConfig, rec Recorder, ctx context.Context, turnID string, iter int) RetryConfig {
+	if rec == nil {
+		return cfg
+	}
+	user := cfg.OnRetry
+	cfg.OnRetry = func(attempt int, wait time.Duration) {
+		if user != nil {
+			user(attempt, wait)
+		}
+		emit(ctx, rec, Event{
+			TurnID: turnID, Iter: iter, Type: EventRetryAttempt,
+			Attempt: attempt, Wait: wait,
+		})
+	}
+	return cfg
 }
 
 // LoopStream is the streaming variant of Loop. It mirrors Loop's structure,
@@ -232,6 +287,13 @@ func (c *Client) LoopStream(
 	copy(msgs, history)
 	var total Usage
 
+	rec := c.cfg.Recorder
+	turnID := ""
+	if rec != nil {
+		turnID = newTurnID()
+		emit(ctx, rec, Event{TurnID: turnID, Type: EventTurnStart, History: msgs})
+	}
+
 	for iter := 0; maxIter == 0 || iter < maxIter; iter++ {
 		req := ProviderRequest{
 			Model:     c.cfg.Model,
@@ -240,41 +302,52 @@ func (c *Client) LoopStream(
 			Messages:  msgs,
 			Tools:     toolDefs,
 		}
-		resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
+		emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventModelRequest})
+		resp, err := callWithRetry(ctx, retryWithRecorder(c.cfg.Retry, rec, ctx, turnID, iter), func() (ProviderResponse, error) {
 			return c.cfg.Provider.Stream(ctx, req, onToken)
 		})
 		if err != nil {
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: err.Error()})
 			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
 		}
 		total.InputTokens += resp.Usage.InputTokens
 		total.OutputTokens += resp.Usage.OutputTokens
-		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Content})
+		assistantMsg := Message{Role: RoleAssistant, Content: resp.Content}
+		msgs = append(msgs, assistantMsg)
+		if rec != nil {
+			usage := resp.Usage
+			emit(ctx, rec, Event{
+				TurnID: turnID, Iter: iter, Type: EventModelResponse,
+				Message: &assistantMsg, Usage: &usage, StopReason: resp.StopReason,
+			})
+		}
 
 		switch resp.StopReason {
 		case "end_turn":
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnEnd, Usage: &total})
 			return LoopResult{Messages: msgs, Usage: total}, nil
 
 		case "tool_use":
-			results, err := runTools(ctx, resp.Content, dispatch)
+			results, err := runTools(ctx, resp.Content, dispatch, rec, turnID, iter)
 			if err != nil {
+				emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: err.Error()})
 				return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
 			}
 			onToolResult(results)
 			msgs = append(msgs, NewToolResultMessage(results))
 
 		case "max_tokens":
-			return LoopResult{Messages: msgs, Usage: total}, &LoopError{
-				Iter:  iter,
-				Cause: fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens"),
-			}
+			cause := fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens")
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: cause.Error()})
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: cause}
 
 		default:
-			return LoopResult{Messages: msgs, Usage: total}, &LoopError{
-				Iter:  iter,
-				Cause: fmt.Errorf("unexpected stop_reason %q", resp.StopReason),
-			}
+			cause := fmt.Errorf("unexpected stop_reason %q", resp.StopReason)
+			emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnError, Err: cause.Error()})
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: cause}
 		}
 	}
+	emit(ctx, rec, Event{TurnID: turnID, Iter: maxIter, Type: EventTurnError, Err: ErrMaxIter.Error()})
 	return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: maxIter, Cause: ErrMaxIter}
 }
 
@@ -283,7 +356,7 @@ func (c *Client) LoopStream(
 // is_error=true results so the model can see and recover from them. A missing
 // tool is a programming error (wrong dispatch map) and aborts before any
 // goroutines are spawned.
-func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]ToolFunc) ([]ToolResult, error) {
+func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]ToolFunc, rec Recorder, turnID string, iter int) ([]ToolResult, error) {
 	uses := extractToolUses(content)
 
 	// Validate all names up front so a missing tool aborts immediately rather
@@ -305,14 +378,26 @@ func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]T
 	for i, use := range uses {
 		i, use := i, use
 		go func() {
+			emit(ctx, rec, Event{
+				TurnID: turnID, Iter: iter, Type: EventToolCallStart,
+				ToolUseID: use.ID, ToolName: use.Name, ToolInput: use.Input,
+			})
 			output, err := dispatch[use.Name](ctx, use.Input)
 			r := ToolResult{ToolUseID: use.ID}
+			endEv := Event{
+				TurnID: turnID, Iter: iter, Type: EventToolCallEnd,
+				ToolUseID: use.ID, ToolName: use.Name,
+			}
 			if err != nil {
 				r.Content = err.Error()
 				r.IsError = true
+				endEv.IsError = true
+				endEv.ToolError = err.Error()
 			} else {
 				r.Content = output
+				endEv.ToolOutput = output
 			}
+			emit(ctx, rec, endEv)
 			ch <- indexed{i: i, result: r}
 		}()
 	}
