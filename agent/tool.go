@@ -67,16 +67,15 @@ func TypedToolFunc[Input any](f func(context.Context, Input) (string, error)) To
 // returns both the Tool (for your tools []Tool slice) and the wrapped
 // ToolFunc (for your dispatch map). This is the most ergonomic path shown
 // in the roadmap while still letting you inspect everything.
+//
+// Panics if schema cannot be marshalled to JSON; in practice InputSchema
+// always marshals successfully, so this is a programmer-error indicator.
 func NewTypedTool[Input any](
 	name, description string,
 	schema InputSchema,
 	f func(context.Context, Input) (string, error),
-) (Tool, ToolFunc, error) {
-	t, err := NewTool(name, description, schema)
-	if err != nil {
-		return Tool{}, nil, fmt.Errorf("agent: NewTypedTool %q: %w", name, err)
-	}
-	return t, TypedToolFunc(f), nil
+) (Tool, ToolFunc) {
+	return NewTool(name, description, schema), TypedToolFunc(f)
 }
 
 // JSONResult marshals v to a JSON string. It is the recommended helper
@@ -290,12 +289,17 @@ type Tool struct {
 }
 
 // NewTool constructs a Tool from a typed InputSchema.
-func NewTool(name, description string, schema InputSchema) (Tool, error) {
+//
+// Panics if schema cannot be marshalled to JSON. InputSchema is a plain Go
+// struct of strings, maps, and slices — marshal cannot fail in practice, so
+// the panic is a programmer-error indicator (corrupt unsafe.Pointer, etc.)
+// rather than a runtime condition callers should handle.
+func NewTool(name, description string, schema InputSchema) Tool {
 	raw, err := json.Marshal(schema)
 	if err != nil {
-		return Tool{}, fmt.Errorf("agent: marshal tool schema for %q: %w", name, err)
+		panic(fmt.Errorf("agent: marshal tool schema for %q: %w", name, err))
 	}
-	return Tool{Name: name, Description: description, InputSchema: raw}, nil
+	return Tool{Name: name, Description: description, InputSchema: raw}
 }
 
 // ToolResult is the output of one ToolFunc execution.

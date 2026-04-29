@@ -12,6 +12,7 @@ It gives you:
 
 - `Ask` and `AskStream` for model calls
 - `Loop` and `LoopStream` for tool-using loops
+- `Extract[T]` for typed structured output (with or without intermediate tool use)
 - plain `[]Message` history and normal Go functions as tools
 - providers for Anthropic, OpenAI, and OpenRouter
 - typed tools, schema helpers, toolsets, middleware, context management, MCP, and a thin `Assistant` block
@@ -156,6 +157,29 @@ fmt.Println(result.FinalText())
 `Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit. Multiple tool calls requested in one model turn run concurrently and return in original order.
 
 Because `Ask`, `Loop`, and `Assistant.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel, then synthesize their outputs with a later `Ask`.
+
+### Tier 4: typed extraction
+
+When you want a typed Go value back from the model — with or without intermediate tool use — `Extract` runs a loop in which the model is required to call a single "submit" tool whose typed argument is the return value:
+
+~~~go
+type Plan struct {
+    Steps []string `json:"steps"`
+}
+
+plan, result, err := agent.Extract[Plan](ctx, client, system, history,
+    agent.ExtractParams[Plan]{
+        Description: "Submit the final plan as a list of ordered steps.",
+        Schema: agent.Object(
+            agent.Array("steps", "ordered steps",
+                agent.SchemaProperty{Type: "string"}, agent.Required()),
+        ),
+        // Tools: searchTools,           // optional: search-then-submit
+        // Validate: func(p Plan) error  // optional: reject and let the model retry
+    })
+~~~
+
+`Extract` is built on `ToolMetadata.Terminal` — a flag that tells `Loop` to short-circuit when a tool is invoked successfully. You can set it yourself for hand-rolled submit patterns; `Extract` is the headline sugar.
 
 ## Practical assembly
 

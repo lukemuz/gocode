@@ -198,7 +198,7 @@ func (w *Workspace) buildBindings() []agent.ToolBinding {
 		Filesystem: true,
 	}
 
-	listDirTool, _ := agent.NewTool(
+	listDirTool := agent.NewTool(
 		"list_directory",
 		"Lists files and directories at a path relative to the workspace root. Non-recursive.",
 		agent.Object(
@@ -206,7 +206,7 @@ func (w *Workspace) buildBindings() []agent.ToolBinding {
 		),
 	)
 
-	findFilesTool, _ := agent.NewTool(
+	findFilesTool := agent.NewTool(
 		"find_files",
 		"Finds files whose names match a glob pattern under a path relative to the workspace root. "+
 			"Results are root-relative slash paths. Capped at the configured MaxResults limit.",
@@ -216,7 +216,7 @@ func (w *Workspace) buildBindings() []agent.ToolBinding {
 		),
 	)
 
-	searchTextTool, _ := agent.NewTool(
+	searchTextTool := agent.NewTool(
 		"search_text",
 		"Searches file contents for lines matching a regular expression. "+
 			"Returns matching lines as \"file:line: content\" entries. "+
@@ -228,7 +228,7 @@ func (w *Workspace) buildBindings() []agent.ToolBinding {
 		),
 	)
 
-	readFileTool, _ := agent.NewTool(
+	readFileTool := agent.NewTool(
 		"read_file",
 		"Reads the contents of a file. Respects MaxFileBytes. "+
 			"Optionally restricts output to a line range (1-indexed, inclusive).",
@@ -239,7 +239,7 @@ func (w *Workspace) buildBindings() []agent.ToolBinding {
 		),
 	)
 
-	fileInfoTool, _ := agent.NewTool(
+	fileInfoTool := agent.NewTool(
 		"file_info",
 		"Returns metadata (name, size, modification time, is_dir, mode) for a path relative to the workspace root.",
 		agent.Object(
@@ -264,7 +264,7 @@ func (w *Workspace) buildEditBinding() agent.ToolBinding {
 		Filesystem:           true,
 		RequiresConfirmation: true,
 	}
-	editFileTool, _ := agent.NewTool(
+	editFileTool := agent.NewTool(
 		"edit_file",
 		"Replaces all occurrences of old_string with new_string in a file. "+
 			"Returns an error if old_string is not found. "+

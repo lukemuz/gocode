@@ -24,7 +24,7 @@ func main() {
 	// NewTypedTool + schema builders (Object/String/Required) provide
 	// both Tool and ToolFunc with minimal boilerplate. Schema helpers
 	// are now implemented (see ROADMAP.md).
-	listDirTool, listDirFn, err := agent.NewTypedTool[ListDirInput](
+	listDirTool, listDirFn := agent.NewTypedTool[ListDirInput](
 		"list_dir",
 		"List the files in a directory.",
 		agent.Object(
@@ -42,11 +42,8 @@ func main() {
 			return agent.JSONResult(names)
 		},
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	readFileTool, readFileFn, err := agent.NewTypedTool[ReadFileInput](
+	readFileTool, readFileFn := agent.NewTypedTool[ReadFileInput](
 		"read_file",
 		"Read the contents of a file.",
 		agent.Object(
@@ -60,14 +57,11 @@ func main() {
 			return string(data), nil
 		},
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	tools := agent.Toolset{Bindings: []agent.ToolBinding{
-		{Tool: listDirTool, Func: listDirFn},
-		{Tool: readFileTool, Func: readFileFn},
-	}}
+	tools := agent.Tools(
+		agent.Bind(listDirTool, listDirFn),
+		agent.Bind(readFileTool, readFileFn),
+	)
 
 	provider, err := agent.NewAnthropicProviderFromEnv()
 	if err != nil {
