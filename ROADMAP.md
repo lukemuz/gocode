@@ -137,40 +137,17 @@ Shipped:
 
 ### 2. Sessions without a runner
 
-**Priority:** medium
+**Priority:** medium  
+**Status:** done
 
-Add boring persistence for conversation history.
+Shipped:
 
-Possible shape:
-
-~~~go
-type Session struct {
-    ID      string
-    History []Message
-    State   map[string]any
-}
-
-type Store interface {
-    Create(ctx context.Context, session *Session) error
-    Get(ctx context.Context, id string) (*Session, error)
-    Update(ctx context.Context, session *Session) error
-    Delete(ctx context.Context, id string) error
-    List(ctx context.Context, prefix string, limit int) ([]*Session, error)
-}
-~~~
-
-Likely built-ins:
-
-- memory store for tests and development
-- file store for simple local apps
-
-Principles:
-
-- sessions do not call models
-- sessions do not run tools
-- sessions do not trim automatically
-- no runner abstraction
-- `Session.History` stays plain `[]Message`
+- `Session` struct: `ID string`, `History []Message`, `State map[string]any` — plain data, no hidden calls or lifecycle
+- `Store` interface: `Create`, `Get`, `Update`, `Delete`, `List` — `Create`/`Update` are intentionally separate to make caller intent explicit
+- `ErrSessionNotFound` and `ErrSessionExists` sentinel errors (both carry the offending ID in their message and match via `errors.Is`)
+- `MemoryStore` — in-memory, safe for concurrent use, deep-copies on all operations; suitable for tests and single-process development
+- `FileStore` — one JSON file per session, atomic writes via temp-file rename, ID validation to prevent path traversal; suitable for simple local apps
+- Shared contract test suite covering all five operations plus isolation and error-path checks, run against both stores
 
 ### 3. Durable tool execution
 
@@ -324,7 +301,7 @@ Higher-level systems can be built on top of `gocode`. The core should remain sma
 | 2 | Recipe documentation | Next |
 | 3 | Repo explainer example | Next |
 | 5 | Assistant hardening | Done |
-| 6 | Session/store helpers | Planned |
+| 6 | Session/store helpers | Done |
 | 7 | Durable tool execution middleware | Planned |
 | 8 | Observability hooks and OTel adapter | Planned |
 | 9 | Extended model configuration | Planned |
