@@ -57,7 +57,7 @@ The library should scale in layers:
 1. **Primitives** — `Client`, `Provider`, `Message`, `Tool`, `ToolFunc`, `Ask`, `Loop`, streaming, retries, typed errors.
 2. **Assembly helpers** — typed tools, schema helpers, toolsets, context managers, assistant steps, provider setup helpers, middleware, hooks.
 3. **Recipes** — practical patterns such as basic assistants, repo explainers, HTTP/SSE chat, persistence, testing, and tool use.
-4. **Advanced composition** — MCP, skills, evaluation, replay, multi-step workflows, and user-owned orchestration.
+4. **Advanced composition** — MCP, evaluation, replay, multi-step workflows, and user-owned orchestration.
 
 Each layer should be useful on its own. No layer should force users to adopt concepts from a later layer before they need them.
 
@@ -149,15 +149,13 @@ The practical path should include explicit context management:
 
 The model should not normally decide when memory is compacted. The application should decide based on budget, request boundaries, or policy.
 
-## Tools, MCP, skills, and subagents
+## Tools, MCP, and subagents
 
 A **tool** is a concrete capability the model may request during a loop: read a file, list a directory, get the current time, calculate, or call a bounded external adapter.
 
 A tool should be bounded, inspectable, and explicitly registered.
 
 **MCP** is an adapter path: remote MCP tools become ordinary `ToolBinding` values. Users choose the server, inspect the tools, and pass selected tools into the loop.
-
-A **skill** is an inspectable bundle of instructions, tools, examples, and metadata. It is not an autonomous agent. It should expose ordinary pieces that the caller can inspect and compose.
 
 A **subagent** is a user-owned LLM workflow invoked by application code. In most cases it can be a normal Go function that calls `Ask`, `Loop`, or an assistant step with specialized prompts and tools.
 
@@ -210,10 +208,9 @@ The point is not feature parity. The point is a smoother complexity curve and cl
 
 Prioritize features that improve the practical path without compromising the primitive path:
 
-1. transparent skills
-2. streaming retry helpers and recipes
-3. practical recipe docs
-4. a repo explainer example
+1. streaming retry helpers and recipes
+2. practical recipe docs
+3. a repo explainer example
 5. boring sessions and durable tool execution
 6. observability, testing, and service examples
 

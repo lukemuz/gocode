@@ -9,9 +9,8 @@ Use these files as the project reference set:
 
 Current focus:
 
-1. add transparent skills
-2. resolve/document streaming retry behavior
-3. write small recipe docs
-4. build the repo explainer example
+1. resolve/document streaming retry behavior
+2. write small recipe docs
+3. build the repo explainer example
 
 Completed foundation work has been removed from the active roadmap and summarized as baseline in `ROADMAP.md`.

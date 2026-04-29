@@ -48,54 +48,14 @@ Available today:
 3. **Preserve the control path.** Raw messages, raw tools, manual loops, custom providers, and user-owned orchestration must remain first-class.
 4. **Prefer ordinary Go.** Plain structs, functions, slices, maps, errors, `context.Context`, and interfaces beat framework vocabulary.
 5. **No hidden ownership.** The library should not own persistence, scheduling, deployment, global registration, memory policy, or application lifecycle.
-6. **Tools are Lego blocks.** Tools, MCP adapters, and skills should all compile down to inspectable `ToolBinding` values.
+6. **Tools are Lego blocks.** Tools and MCP adapters should all compile down to inspectable `ToolBinding` values.
 7. **Boring is good.** Reliability, inspectability, and testability matter more than adding agent vocabulary.
 
 ## P1 — Finish the practical agent path
 
 P1 focuses on completing the path from primitives to useful local assistants.
 
-### 1. Native skills support
-
-**Priority:** high  
-**Status:** done
-
-A skill is an inspectable bundle of instructions, tools, examples, and metadata. It is not an autonomous agent and does not own a loop.
-
-Possible package:
-
-~~~text
-github.com/lukemuz/gocode/agent/skills
-~~~
-
-Possible shape:
-
-~~~go
-skill := skills.NewRepoExplainer(skills.RepoExplainerConfig{Root: "."})
-
-system := agent.JoinInstructions(baseSystem, skill.Instructions())
-toolset, err := agent.Join(localTools, skill.Toolset())
-
-result, err := client.Loop(ctx, system, history, toolset.Tools(), toolset.Dispatch(), 10)
-~~~
-
-Initial skill candidates:
-
-- repo explainer
-- log summarizer
-- code review helper
-- local docs Q&A
-
-Principles:
-
-- expose ordinary instructions, `Toolset`, examples, and metadata
-- no hidden model calls
-- no hidden loop
-- no global registry
-- compose with local tools and MCP tools
-- let callers inspect, adapt, wrap, or ignore any part
-
-### 2. Streaming retry semantics
+### 1. Streaming retry semantics
 
 **Priority:** high  
 **Status:** next
@@ -368,10 +328,9 @@ Higher-level systems can be built on top of `gocode`. The core should remain sma
 
 | Order | Item | Status |
 |---|---|---|
-| 1 | Native skills support | Next |
-| 2 | Streaming retry helper and docs | Next |
-| 3 | Recipe documentation | Next |
-| 4 | Repo explainer example | Next |
+| 1 | Streaming retry helper and docs | Next |
+| 2 | Recipe documentation | Next |
+| 3 | Repo explainer example | Next |
 | 5 | Assistant hardening | Planned |
 | 6 | Session/store helpers | Planned |
 | 7 | Durable tool execution middleware | Planned |
@@ -388,9 +347,8 @@ Higher-level systems can be built on top of `gocode`. The core should remain sma
 
 The next coherent milestone is:
 
-1. skills as transparent bundles
-2. streaming retry helper/documentation
-3. recipes that show the practical path
-4. repo explainer example that ties together `Assistant`, `Toolset`, context management, workspace tools, and streaming
+1. streaming retry helper/documentation
+2. recipes that show the practical path
+3. repo explainer example that ties together `Assistant`, `Toolset`, context management, workspace tools, and streaming
 
 That milestone should make `gocode` feel complete for local, practical agents while preserving the same simple foundation: ordinary Go code, visible data flow, explicit control.
