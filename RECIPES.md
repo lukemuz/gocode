@@ -9,19 +9,22 @@ The goal is legibility, not feature coverage. Each recipe should:
 
 - be 150–300 lines of ordinary Go
 - map 1:1 to a scenario a developer would otherwise reach for ADK or LangGraph for
-- reference a corresponding section in [`COMPARISON.md`](COMPARISON.md) where
-  the equivalent ADK shape is described
 - show the data flow plainly: history is `[]Message`, tools are functions,
   loops are visible, persistence is explicit
+
+A recipe earns a section in [`COMPARISON.md`](COMPARISON.md) only when it
+proves a distinct philosophical claim against ADK. Most recipes won't —
+they're demonstrations, not arguments. Three load-bearing comparisons is
+enough; see `COMPARISON.md` for which.
 
 ## The eight scenarios
 
 | # | Recipe | What it demonstrates | Status |
 |---|---|---|---|
-| 01 | `01-assistant-with-tools` | Single assistant with a curated toolset, middleware, and context management | planned |
+| 01 | `01-assistant-with-tools` | Single assistant with a curated toolset, middleware, and context management | shipped |
 | 02 | `02-repo-explainer` | Sandboxed workspace tools, streaming, summarization, file-backed sessions | planned |
 | 03 | `03-workflow-agent` | Read-then-act batch workflow over a list of inputs | planned |
-| 04 | `04-router-subagents` | Parent agent delegates to specialist subagents — *subagents are tools* | in progress |
+| 04 | `04-router-subagents` | Parent agent delegates to specialist subagents — *subagents are tools* | shipped |
 | 05 | `05-persistent-chat` | Long-running conversation with `FileStore`, context trimming, and a summarizer | planned |
 | 06 | `06-http-sse` | `net/http` handler streaming model output over Server-Sent Events | planned |
 | 07 | `07-cli-agent` | Interactive terminal agent in the Claude Code / Aider shape | planned |
@@ -36,8 +39,9 @@ Every recipe directory contains:
   exercises
 - a one-line entry in this file's status table
 
-When a recipe lands, update the status column and add a link in
-[`COMPARISON.md`](COMPARISON.md) to the corresponding ADK section.
+When a recipe lands, update the status column. Only update
+[`COMPARISON.md`](COMPARISON.md) if the recipe proves a new philosophical
+claim that isn't already covered there.
 
 ## Ordering rationale
 

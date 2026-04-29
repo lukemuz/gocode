@@ -172,15 +172,29 @@ A working version of this pattern lives in
 
 ## Worked comparison: persistent chat
 
-*Coming with recipe 05 (`persistent-chat`).*
-
-## Worked comparison: streaming over HTTP/SSE
-
-*Coming with recipe 06 (`http-sse`).*
+*Coming with recipe 05 (`persistent-chat`).* This one earns its place because
+"you own the data, not a `SessionService`" is the second-most-common ADK
+objection and deserves a side-by-side.
 
 ## Worked comparison: trajectory testing
 
-*Coming once trajectory test helpers land.*
+*Coming once trajectory test helpers land.* This one earns its place because
+"ordinary Go testing vs. hosted eval dashboards" is a major axis of
+differentiation that no amount of recipe code makes obvious on its own.
+
+## Why only three comparisons
+
+Every recipe in [`RECIPES.md`](RECIPES.md) demonstrates the library, but
+most of them don't need an ADK comparison — they would just retell the same
+point in a different domain. The three comparisons in this document each
+prove a distinct philosophical claim:
+
+1. *Subagents are tools* — router recipe (above)
+2. *You own the data* — persistent-chat recipe (planned)
+3. *Testing is ordinary Go* — trajectory-testing helpers (planned)
+
+If a future feature opens up a fourth axis of meaningful difference, a
+comparison gets added. Otherwise this document stays focused.
 
 ## What `gocode` will not become
 
