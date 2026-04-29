@@ -193,6 +193,21 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req ProviderRequest, onD
 
 		if typ, ok := event["type"].(string); ok {
 			switch typ {
+			case "message_start":
+				// Input token count is only sent in the message_start event.
+				if msg, ok := event["message"].(map[string]interface{}); ok {
+					if u, ok := msg["usage"].(map[string]interface{}); ok {
+						if in, ok := u["input_tokens"].(float64); ok {
+							usage.InputTokens = int(in)
+						}
+					}
+				}
+			case "error":
+				if errMap, ok := event["error"].(map[string]interface{}); ok {
+					errType, _ := errMap["type"].(string)
+					errMsg, _ := errMap["message"].(string)
+					return ProviderResponse{}, &APIError{Type: errType, Message: errMsg}
+				}
 			case "content_block_start":
 				if cb, ok := event["content_block"].(map[string]interface{}); ok {
 					if t, _ := cb["type"].(string); t == TypeToolUse {

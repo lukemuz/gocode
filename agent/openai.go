@@ -392,6 +392,12 @@ func doOpenAICompatibleStream(
 			break
 		}
 
+		// Some providers embed error objects in the stream body even on HTTP 200.
+		var errCheck openAIErrorBody
+		if err := json.Unmarshal([]byte(data), &errCheck); err == nil && errCheck.Error.Message != "" {
+			return ProviderResponse{}, &APIError{Type: errCheck.Error.Type, Message: errCheck.Error.Message}
+		}
+
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
