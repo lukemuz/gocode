@@ -49,7 +49,7 @@ For any of those, ADK (or another framework) is the better fit.
 
 ## Two worked comparisons
 
-Two patterns each prove a distinct philosophical claim. A third (trajectory testing) will land when the helpers do. Other recipes live under `examples/recipes/`; they demonstrate the library but don't need an ADK comparison to make their point.
+Two patterns each prove a distinct philosophical claim. Other recipes live under `examples/recipes/`; they demonstrate the library but don't need an ADK comparison to make their point.
 
 ### 1. Router with specialists — *subagents are tools*
 
