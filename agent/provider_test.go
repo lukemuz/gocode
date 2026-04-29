@@ -1,10 +1,9 @@
 package agent
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,8 +59,9 @@ func TestAnthropicProvider_Stream(t *testing.T) {
 		{
 			name: "tool use with partial_json",
 			streamLines: []string{
+				`data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}`,
 				`data: {"type":"content_block_start","content_block":{"type":"tool_use","id":"tu_123","name":"calculator"}}`,
-				`data: {"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"op\":\"add\"}"}}`,
+				`data: {"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"op\":\"add\""}}`,
 				`data: {"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":",\"num\":42}"}}`,
 				`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
 				`data: [DONE]`,
@@ -89,9 +89,11 @@ func TestAnthropicProvider_Stream(t *testing.T) {
 			defer srv.Close()
 
 			p := &AnthropicProvider{
-				APIKey:     "test-key",
-				HTTPClient: srv.Client(),
-				BaseURL:    srv.URL,
+				cfg: AnthropicConfig{
+					APIKey:     "test-key",
+					HTTPClient: srv.Client(),
+					BaseURL:    srv.URL,
+				},
 			}
 
 			var gotDeltas []ContentBlock
@@ -192,10 +194,11 @@ func TestOpenAICompatibleStream(t *testing.T) {
 
 			// Use OpenAI provider as it exercises doOpenAICompatibleStream
 			p := &OpenAIProvider{
-				APIKey:     "test-key",
-				HTTPClient: srv.Client(),
-				BaseURL:    srv.URL,
-				IsOpenRouter: false,
+				cfg: OpenAIConfig{
+					APIKey:     "test-key",
+					HTTPClient: srv.Client(),
+					BaseURL:    srv.URL,
+				},
 			}
 
 			var gotDeltas []ContentBlock
@@ -247,9 +250,11 @@ func TestProviderErrorHandling(t *testing.T) {
 	defer srv.Close()
 
 	p := &AnthropicProvider{
-		APIKey:     "test",
-		HTTPClient: srv.Client(),
-		BaseURL:    srv.URL,
+		cfg: AnthropicConfig{
+			APIKey:     "test",
+			HTTPClient: srv.Client(),
+			BaseURL:    srv.URL,
+		},
 	}
 
 	_, err := p.Call(context.Background(), ProviderRequest{Model: "test"})

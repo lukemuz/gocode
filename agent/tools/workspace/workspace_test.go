@@ -1,0 +1,273 @@
+package workspace_test
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/lukemuz/gocode/agent/tools/workspace"
+)
+
+// setupTestDir creates a temporary directory with a small tree for tests.
+//
+//	root/
+//	  hello.txt       "hello world\n"
+//	  subdir/
+//	    foo.go        "package foo\n\nfunc Foo() {}\n"
+//	    bar.go        "package foo\n\nfunc Bar() {}\n"
+func setupTestDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello world\n"), 0644))
+	must(os.MkdirAll(filepath.Join(root, "subdir"), 0755))
+	must(os.WriteFile(filepath.Join(root, "subdir", "foo.go"), []byte("package foo\n\nfunc Foo() {}\n"), 0644))
+	must(os.WriteFile(filepath.Join(root, "subdir", "bar.go"), []byte("package foo\n\nfunc Bar() {}\n"), 0644))
+	return root
+}
+
+func newWS(t *testing.T, root string) *workspace.Workspace {
+	t.Helper()
+	ws, err := workspace.NewReadOnly(workspace.Config{Root: root})
+	if err != nil {
+		t.Fatalf("NewReadOnly: %v", err)
+	}
+	return ws
+}
+
+func callTool(t *testing.T, ws *workspace.Workspace, name string, args any) string {
+	t.Helper()
+	dispatch := ws.Dispatch()
+	fn, ok := dispatch[name]
+	if !ok {
+		t.Fatalf("dispatch missing %q", name)
+	}
+	raw, _ := json.Marshal(args)
+	out, err := fn(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("%s: unexpected error: %v", name, err)
+	}
+	return out
+}
+
+func TestNewReadOnlyRequiresRoot(t *testing.T) {
+	_, err := workspace.NewReadOnly(workspace.Config{})
+	if err == nil {
+		t.Fatal("want error for empty root, got nil")
+	}
+}
+
+func TestToolsetHasFiveBindings(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	ts := ws.Toolset()
+	if len(ts.Bindings) != 5 {
+		t.Errorf("want 5 bindings, got %d", len(ts.Bindings))
+	}
+}
+
+func TestListDirectory(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "list_directory", map[string]any{"path": "."})
+	var entries []struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"is_dir"`
+	}
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		t.Fatalf("unmarshal: %v (raw: %s)", err, out)
+	}
+	names := make(map[string]bool)
+	for _, e := range entries {
+		names[e.Name] = true
+	}
+	if !names["hello.txt"] {
+		t.Error("expected hello.txt in listing")
+	}
+	if !names["subdir"] {
+		t.Error("expected subdir in listing")
+	}
+}
+
+func TestListDirectoryDefault(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	// empty path should default to root
+	out := callTool(t, ws, "list_directory", map[string]any{})
+	if !strings.Contains(out, "hello.txt") {
+		t.Errorf("expected hello.txt in output, got: %s", out)
+	}
+}
+
+func TestListDirectoryTraversalRejected(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{"path": "../"})
+	_, err := dispatch["list_directory"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error for path traversal, got nil")
+	}
+}
+
+func TestFindFiles(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "find_files", map[string]any{"pattern": "*.go"})
+	var files []string
+	if err := json.Unmarshal([]byte(out), &files); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("want 2 .go files, got %d: %v", len(files), files)
+	}
+}
+
+func TestFindFilesNoMatch(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "find_files", map[string]any{"pattern": "*.rs"})
+	var files []string
+	json.Unmarshal([]byte(out), &files)
+	if len(files) != 0 {
+		t.Errorf("want 0 .rs files, got %d", len(files))
+	}
+}
+
+func TestSearchText(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "search_text", map[string]any{
+		"pattern": "func",
+		"include": "*.go",
+	})
+	var matches []struct {
+		File string `json:"file"`
+		Line int    `json:"line"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(out), &matches); err != nil {
+		t.Fatalf("unmarshal: %v (raw: %s)", err, out)
+	}
+	if len(matches) < 2 {
+		t.Errorf("want at least 2 func matches, got %d", len(matches))
+	}
+}
+
+func TestSearchTextInvalidPattern(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{"pattern": "["}) // invalid regex
+	_, err := dispatch["search_text"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error for invalid regex, got nil")
+	}
+}
+
+func TestReadFile(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "read_file", map[string]any{"path": "hello.txt"})
+	if !strings.Contains(out, "hello world") {
+		t.Errorf("expected 'hello world' in output, got: %s", out)
+	}
+}
+
+func TestReadFileLineRange(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	// foo.go has 3 lines; request line 3 only (the func line)
+	out := callTool(t, ws, "read_file", map[string]any{
+		"path":       "subdir/foo.go",
+		"start_line": 3,
+		"end_line":   3,
+	})
+	if !strings.Contains(out, "Foo") {
+		t.Errorf("expected Foo in line 3 output, got: %s", out)
+	}
+	if strings.Contains(out, "package") {
+		t.Errorf("should not include line 1 (package), got: %s", out)
+	}
+}
+
+func TestReadFileTraversalRejected(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{"path": "../secret"})
+	_, err := dispatch["read_file"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error for traversal, got nil")
+	}
+}
+
+func TestReadFileSizeLimit(t *testing.T) {
+	root := t.TempDir()
+	big := strings.Repeat("a", 200)
+	os.WriteFile(filepath.Join(root, "big.txt"), []byte(big), 0644)
+
+	ws, _ := workspace.NewReadOnly(workspace.Config{Root: root, MaxFileBytes: 100})
+	out := callTool(t, ws, "read_file", map[string]any{"path": "big.txt"})
+	if len(out) >= 200 {
+		t.Errorf("expected truncation, got %d bytes", len(out))
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Errorf("expected truncation notice, got: %s", out)
+	}
+}
+
+func TestFileInfo(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "file_info", map[string]any{"path": "hello.txt"})
+	var info struct {
+		Name  string `json:"name"`
+		Size  int64  `json:"size"`
+		IsDir bool   `json:"is_dir"`
+	}
+	if err := json.Unmarshal([]byte(out), &info); err != nil {
+		t.Fatalf("unmarshal: %v (raw: %s)", err, out)
+	}
+	if info.Name != "hello.txt" {
+		t.Errorf("want name hello.txt, got %q", info.Name)
+	}
+	if info.IsDir {
+		t.Error("hello.txt should not be a directory")
+	}
+	if info.Size == 0 {
+		t.Error("hello.txt size should not be 0")
+	}
+}
+
+func TestFileInfoOnDir(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	out := callTool(t, ws, "file_info", map[string]any{"path": "subdir"})
+	var info struct {
+		IsDir bool `json:"is_dir"`
+	}
+	json.Unmarshal([]byte(out), &info)
+	if !info.IsDir {
+		t.Error("subdir should be a directory")
+	}
+}
+
+func TestAbsolutePathRejected(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS(t, root)
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{"path": "/etc/passwd"})
+	_, err := dispatch["read_file"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error for absolute path, got nil")
+	}
+}

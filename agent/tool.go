@@ -148,9 +148,8 @@ func Enum(values ...any) Option {
 // String returns a Property with type "string".
 func String(name, description string, opts ...Option) Property {
 	p := Property{
-		Name:        name,
-		Type:        "string",
-		Description: description,
+		Name:           name,
+		SchemaProperty: SchemaProperty{Type: "string", Description: description},
 	}
 	for _, opt := range opts {
 		opt(&p)
@@ -161,9 +160,8 @@ func String(name, description string, opts ...Option) Property {
 // Number returns a Property with type "number".
 func Number(name, description string, opts ...Option) Property {
 	p := Property{
-		Name:        name,
-		Type:        "number",
-		Description: description,
+		Name:           name,
+		SchemaProperty: SchemaProperty{Type: "number", Description: description},
 	}
 	for _, opt := range opts {
 		opt(&p)
@@ -174,9 +172,8 @@ func Number(name, description string, opts ...Option) Property {
 // Integer returns a Property with type "integer".
 func Integer(name, description string, opts ...Option) Property {
 	p := Property{
-		Name:        name,
-		Type:        "integer",
-		Description: description,
+		Name:           name,
+		SchemaProperty: SchemaProperty{Type: "integer", Description: description},
 	}
 	for _, opt := range opts {
 		opt(&p)
@@ -187,9 +184,8 @@ func Integer(name, description string, opts ...Option) Property {
 // Boolean returns a Property with type "boolean".
 func Boolean(name, description string, opts ...Option) Property {
 	p := Property{
-		Name:        name,
-		Type:        "boolean",
-		Description: description,
+		Name:           name,
+		SchemaProperty: SchemaProperty{Type: "boolean", Description: description},
 	}
 	for _, opt := range opts {
 		opt(&p)

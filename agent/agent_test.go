@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +23,12 @@ var testResponse = ProviderResponse{
 // responses, errors, and spies for callbacks. Call/StreamCount and DeltaSpy
 // allow verifying calls and deltas without side effects on real providers.
 // Use newTestProvider() for defaults or set fields directly in tests.
+//
+// Responses, when non-nil, is consumed in order (FIFO). When exhausted,
+// Resp is returned. This allows tests to script multi-turn sequences.
 type testProvider struct {
 	Resp            ProviderResponse
+	Responses       []ProviderResponse // consumed in order; falls back to Resp
 	Err             error
 	Deltas          []ContentBlock
 	DeltaSpy        func(ContentBlock)
@@ -45,6 +47,11 @@ func (p *testProvider) Call(ctx context.Context, req ProviderRequest) (ProviderR
 	p.CallCount++
 	if p.Err != nil {
 		return ProviderResponse{}, p.Err
+	}
+	if len(p.Responses) > 0 {
+		resp := p.Responses[0]
+		p.Responses = p.Responses[1:]
+		return resp, nil
 	}
 	return p.Resp, nil
 }
@@ -622,12 +629,13 @@ func TestCallWithRetry(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name          string
-		retryCfg      RetryConfig
-		fn            func() (ProviderResponse, error)
-		wantErr       error
-		wantAttempts  int
-		wantResp      bool
+		name         string
+		retryCfg     RetryConfig
+		fn           func() (ProviderResponse, error)
+		wantErr      error // checked with errors.Is; nil means no error expected
+		wantSomeErr  bool  // true when an error is expected but no sentinel to check
+		wantAttempts int
+		wantResp     bool
 	}{
 		{
 			name: "success on first try",
@@ -645,7 +653,7 @@ func TestCallWithRetry(t *testing.T) {
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &APIError{StatusCode: 400, Message: "bad request"}
 			},
-			wantErr:      nil, // wrapped but we check type below
+			wantSomeErr:  true,
 			wantAttempts: 1,
 		},
 		{
@@ -654,7 +662,7 @@ func TestCallWithRetry(t *testing.T) {
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &APIError{StatusCode: 429, Message: "rate limited"}
 			},
-			wantErr:      nil, // will be RetryExhaustedError
+			wantErr:      ErrRetryExhausted,
 			wantAttempts: 2,
 		},
 		{
@@ -679,7 +687,8 @@ func TestCallWithRetry(t *testing.T) {
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &APIError{StatusCode: 503}
 			},
-			wantErr: nil,
+			wantSomeErr:  true,
+			wantAttempts: 1,
 		},
 	}
 
@@ -701,8 +710,15 @@ func TestCallWithRetry(t *testing.T) {
 						t.Errorf("expected %d attempts, got %d", tt.wantAttempts, exhausted.Attempts)
 					}
 				}
+			} else if tt.wantSomeErr {
+				if err == nil {
+					t.Error("expected an error, got nil")
+				}
 			} else if err != nil {
 				t.Errorf("unexpected err: %v", err)
+			}
+			if tt.wantAttempts > 0 && attempts != tt.wantAttempts {
+				t.Errorf("attempts = %d, want %d", attempts, tt.wantAttempts)
 			}
 			if tt.wantResp && len(resp.Content) == 0 {
 				t.Error("expected valid response")
@@ -712,82 +728,107 @@ func TestCallWithRetry(t *testing.T) {
 }
 
 func TestLoop(t *testing.T) {
+	toolUseResp := ProviderResponse{
+		Content:    []ContentBlock{{Type: TypeToolUse, ID: "tu1", Name: "echo"}},
+		StopReason: "tool_use",
+		Usage:      Usage{InputTokens: 10, OutputTokens: 5},
+	}
+	echoDispatch := map[string]ToolFunc{
+		"echo": func(context.Context, json.RawMessage) (string, error) { return "result", nil },
+	}
+
 	tests := []struct {
-		name           string
-		stopReason     string
-		tools          []Tool
-		dispatch       map[string]ToolFunc
-		maxIter        int
-		wantErr        error
-		wantMsgCount   int
-		wantStopReason string
+		name            string
+		responses       []ProviderResponse // scripted sequence; last entry repeated if exhausted
+		tools           []Tool
+		dispatch        map[string]ToolFunc
+		maxIter         int
+		wantErr         error
+		wantMsgCount    int
+		wantInputTokens int
 	}{
 		{
-			name:        "end_turn success",
-			stopReason:  "end_turn",
-			wantErr:     nil,
+			name:            "end_turn success",
+			responses:       []ProviderResponse{testResponse},
+			wantMsgCount:    2,
+			wantInputTokens: 10,
+		},
+		{
+			name: "tool_use with successful dispatch",
+			// First call: tool_use; second call: end_turn.
+			responses:       []ProviderResponse{toolUseResp, testResponse},
+			tools:           []Tool{{Name: "echo"}},
+			dispatch:        echoDispatch,
+			wantMsgCount:    4, // history + assistant(tool_use) + tool_result + assistant(end_turn)
+			wantInputTokens: 20,
+		},
+		{
+			name:         "missing tool aborts with ToolError",
+			responses:    []ProviderResponse{toolUseResp},
+			tools:        []Tool{{Name: "echo"}},
+			dispatch:     map[string]ToolFunc{}, // echo missing → ErrMissingTool
+			wantErr:      ErrMissingTool,
 			wantMsgCount: 2,
 		},
 		{
-			name:        "tool_use with successful dispatch",
-			stopReason:  "tool_use",
-			tools:       []Tool{{Name: "echo"}},
-			dispatch: map[string]ToolFunc{
-				"echo": func(context.Context, json.RawMessage) (string, error) { return "result", nil },
-			},
-			wantErr:      nil,
-			wantMsgCount: 3, // history + assistant + tool_result
-		},
-		{
-			name:       "missing tool aborts with ToolError",
-			stopReason: "tool_use",
-			tools:      []Tool{{Name: "echo"}},
-			dispatch:   map[string]ToolFunc{},
-			wantErr:    ErrMissingTool,
-			wantMsgCount: 2,
-		},
-		{
-			name:         "maxIter exhaustion",
-			stopReason:   "end_turn",
+			name: "maxIter exhaustion",
+			// Provider always returns tool_use; maxIter=1 forces exit after 1 iteration.
+			responses:    []ProviderResponse{toolUseResp},
+			tools:        []Tool{{Name: "echo"}},
+			dispatch:     echoDispatch,
 			maxIter:      1,
 			wantErr:      ErrMaxIter,
-			wantMsgCount: 2,
+			wantMsgCount: 3, // history + assistant(tool_use) + tool_result
 		},
 		{
-			name:        "max_tokens error",
-			stopReason:  "max_tokens",
-			wantErr:     nil, // wrapped in LoopError
-			wantMsgCount: 2,
+			name: "max_tokens error",
+			responses: []ProviderResponse{{
+				Content:    []ContentBlock{{Type: TypeText, Text: "truncated"}},
+				StopReason: "max_tokens",
+				Usage:      Usage{InputTokens: 10, OutputTokens: 5},
+			}},
+			wantErr:         nil, // wrapped in LoopError — checked via wantSomeErr below
+			wantMsgCount:    2,
+			wantInputTokens: 10,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newTestProvider()
-			p.Resp.StopReason = tt.stopReason
-			if tt.stopReason == "tool_use" {
-				p.Resp.Content = []ContentBlock{{Type: TypeToolUse, ID: "tu1", Name: "echo"}}
+			// Load the scripted sequence; last entry is the fallback Resp.
+			if len(tt.responses) > 0 {
+				p.Resp = tt.responses[len(tt.responses)-1]
+				if len(tt.responses) > 1 {
+					p.Responses = tt.responses[:len(tt.responses)-1]
+				}
 			}
 			c, _ := New(Config{Provider: p, Model: "test-model"})
 			history := []Message{NewUserMessage("hi")}
 			result, err := c.Loop(context.Background(), "sys", history, tt.tools, tt.dispatch, tt.maxIter)
 			if tt.wantErr != nil {
-				if !errors.Is(err, tt.wantErr) {
+				found := errors.Is(err, tt.wantErr)
+				if !found {
 					var le *LoopError
 					if errors.As(err, &le) {
-						if !errors.Is(le.Cause, tt.wantErr) {
-							t.Errorf("got err %v, want containing %v", err, tt.wantErr)
-						}
-					} else {
-						t.Errorf("got err %v, want %v", err, tt.wantErr)
+						found = errors.Is(le.Cause, tt.wantErr)
 					}
 				}
+				if !found {
+					t.Errorf("got err %v, want containing %v", err, tt.wantErr)
+				}
+			} else if tt.name == "max_tokens error" {
+				if err == nil {
+					t.Error("expected error for max_tokens, got nil")
+				}
+			} else if err != nil {
+				t.Errorf("unexpected err: %v", err)
 			}
 			if len(result.Messages) != tt.wantMsgCount {
 				t.Errorf("got %d messages, want %d", len(result.Messages), tt.wantMsgCount)
 			}
-			if result.Usage.InputTokens != 10 {
-				t.Errorf("unexpected usage %+v", result.Usage)
+			if tt.wantInputTokens > 0 && result.Usage.InputTokens != tt.wantInputTokens {
+				t.Errorf("InputTokens = %d, want %d", result.Usage.InputTokens, tt.wantInputTokens)
 			}
 		})
 	}
