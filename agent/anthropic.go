@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -42,6 +43,31 @@ func NewAnthropicProvider(cfg AnthropicConfig) (*AnthropicProvider, error) {
 		cfg.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return &AnthropicProvider{cfg: cfg}, nil
+}
+
+// NewAnthropicProviderFromEnv creates an AnthropicProvider using the
+// ANTHROPIC_API_KEY environment variable. Returns an error if the variable
+// is unset or empty. Use this when you need to supply a custom Config to
+// agent.New; otherwise prefer NewAnthropicClientFromEnv.
+func NewAnthropicProviderFromEnv() (*AnthropicProvider, error) {
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return nil, fmt.Errorf("agent: ANTHROPIC_API_KEY environment variable is not set")
+	}
+	return NewAnthropicProvider(AnthropicConfig{APIKey: key})
+}
+
+// NewAnthropicClientFromEnv creates a Client backed by the Anthropic provider,
+// reading the API key from ANTHROPIC_API_KEY. model is the model identifier;
+// pass ModelOpus, ModelSonnet, ModelHaiku, or any Anthropic model string.
+// For custom retry, MaxTokens, or HTTP client settings, use
+// NewAnthropicProviderFromEnv + agent.New instead.
+func NewAnthropicClientFromEnv(model string) (*Client, error) {
+	provider, err := NewAnthropicProviderFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return New(Config{Provider: provider, Model: model})
 }
 
 // anthropicRequest is the JSON body sent to POST /v1/messages.

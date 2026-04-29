@@ -5,22 +5,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/lukemuz/gocode/agent"
 )
 
 func main() {
-	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
-		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	client, err := agent.New(agent.Config{
-		Provider: provider,
-		Model:    agent.ModelSonnet,
-	})
+	client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -314,15 +314,52 @@ P1 is about making real agent assembly feel effortless without introducing a hid
 
 The immediate product goal is a practical agent pattern that combines:
 
-- safe tools
-- toolsets and dispatch helpers
+- parallel tool execution for correctness and speed
+- safe tools, including edit capability for coding agents
+- a compelling example app that forces real composition of all the pieces
+- toolsets, dispatch helpers, and a `WithConfirmation` middleware
 - explicit context management
-- a basic, extensible agent block
-- practical assistant recipes and one compelling example app
+- a basic, extensible `Assistant` block as the P1 centerpiece
+- streaming retry semantics locked down before more streaming use cases are built
+- native MCP and skills support for progressive prompt discovery
+- practical assistant recipes
 
 This should make useful agents easier to build without making one-off model calls any heavier.
 
-### 1. Safe pre-built tool library
+### 1. Parallel tool execution
+
+Priority: high. Ship before the `Assistant` block.
+
+Problem:
+
+`runTools` in `agent.go` executes tool calls sequentially. When the model requests multiple tools in one turn — three file reads, a search plus a file read, a batch of queries — each call waits for the previous one to finish. This is a correctness issue as much as a performance issue: sequential execution silently penalizes every multi-tool turn in every application.
+
+Goal:
+
+Execute all tool calls in a single turn concurrently, using the same goroutine pattern already established by `Parallel`. Return results in the original order so the model's context is stable.
+
+Possible implementation:
+
+~~~go
+func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]ToolFunc) ([]ToolResult, error) {
+    uses := extractToolUses(content)
+    results := make([]ToolResult, len(uses))
+    // spawn one goroutine per tool use; collect into index-aligned results
+    ...
+}
+~~~
+
+Principles:
+
+- tool calls within a single turn are independent by definition (the model issued them together)
+- results must be returned in the original order so tool_use IDs align with tool_result IDs
+- a missing tool (programming error) should still abort immediately rather than waiting for other calls to finish
+- individual tool errors remain soft (fed back to model as `is_error: true`) — this does not change
+- callers should not need to change any code; this is a transparent correctness fix
+
+This ships before the `Assistant` block so the block inherits correct concurrent execution from the start.
+
+### 2. Safe pre-built tool library
 
 Priority: high.
 
@@ -377,6 +414,9 @@ These are the strongest candidates because they are broadly useful, can be imple
 | workspace grep/search text | `tools/workspace` | bounded content search without arbitrary shell access |
 | workspace read file | `tools/workspace` | sandboxed reads with max bytes and optional line ranges |
 | workspace file info | `tools/workspace` | safe metadata without exposing a general command runner |
+| workspace edit file | `tools/workspace` | exact-string replacement with expected match count; the minimum mutation primitive for coding agents; read-only is a dead end without it |
+
+`workspace edit file` belongs in the initial core because read-only filesystem tools are only useful up to a point. Any coding agent that can read but cannot write is incomplete. Exact-string replacement (with an optional expected-match count to guard against ambiguous edits) is meaningfully safer than a general write, easier for models to call correctly, and bounded by the workspace root. This is the one mutation primitive that justifies its inclusion in the core; `write_file` and `create_directory` can follow later.
 
 Possible later built-ins.
 
@@ -386,7 +426,6 @@ These are useful, but should not be added just because coding agents commonly ne
 |---|---|---|
 | workspace create directory | `tools/workspace` | worthwhile if bundled with sandboxing and confirmation wrappers |
 | workspace write file | `tools/workspace` | worthwhile if safer than full shell writes and bounded by root |
-| workspace edit file | `tools/workspace` | likely worthwhile if it supports exact replacement and expected match counts |
 | workspace move path | `tools/workspace` | maybe; useful but clearly mutating |
 | HTTP GET/JSON fetch | `tools/http` | maybe; network access requires allowlists, timeouts, and response limits |
 | HTTP POST | `tools/http` | maybe later; external mutation requires stronger allowlists and confirmation |
@@ -447,7 +486,7 @@ Principles:
 - no hidden background work
 - no hidden model calls
 
-### 2. Native MCP support
+### 3. Native MCP support
 
 Priority: high.
 
@@ -473,6 +512,8 @@ toolset, err := server.Toolset(ctx)
 
 result, err := client.Loop(ctx, system, history, toolset.Tools, toolset.Dispatch, 10)
 ```
+
+MCP is also `gocode`'s answer to the broader tool ecosystem. Vector databases, document parsers, embedding APIs, web search adapters, and language-specific integrations increasingly expose MCP servers — many already implemented in Python, TypeScript, or Rust. Rather than porting those client libraries to Go, users connect to an MCP server and the tools become ordinary `agent.Tool` definitions. This is the polyglot tool bridge: Go handles orchestration, tools live in whatever language makes sense. Users should not need to choose between Go's production characteristics and the Python/TypeScript tool ecosystem.
 
 Principles:
 
@@ -503,7 +544,7 @@ OpenAPI support is useful, but it should be deferred for now. It is less urgent 
 
 If added later, OpenAPI should follow the same rule as MCP: selected operations become ordinary `agent.Tool` definitions and ordinary `agent.ToolFunc` handlers. Users must explicitly choose the spec, allowed operations, auth, timeouts, and safety wrappers.
 
-### 3. Native skills support
+### 4. Native skills support
 
 Priority: high.
 
@@ -573,7 +614,7 @@ Skills should make common higher-level workflows easier while preserving the cen
 
 > You own the data. You own the tools. You own the loop.
 
-### 4. Tool bindings, toolsets, and dispatch helpers
+### 5. Tool bindings, toolsets, and dispatch helpers
 
 Priority: medium-high.
 
@@ -638,10 +679,32 @@ Middleware and wrappers:
 - timeout
 - result size limit
 - logging
-- confirmation
+- confirmation (see below)
 - panic recovery
 - redaction
 - retry, only when explicitly configured
+
+`WithConfirmation` is a first-class middleware, not an afterthought. `ToolMetadata.RequiresConfirmation` already exists as a flag but currently does nothing — there must be a provided way to act on it. The shape should accept a caller-supplied prompt function so the library stays UI-agnostic:
+
+~~~go
+func WithConfirmation(prompt func(ctx context.Context, binding ToolBinding, input json.RawMessage) (bool, error)) Middleware
+~~~
+
+When `prompt` returns `false`, the tool call is skipped and a descriptive string is returned to the model instead of an error, so it can explain the situation to the user. When `prompt` returns an error, the call is treated as a hard tool error.
+
+A common pattern is to apply `WithConfirmation` only to bindings where `Meta.RequiresConfirmation` is true:
+
+~~~go
+toolset.Wrap(agent.WithConfirmation(func(ctx context.Context, b agent.ToolBinding, input json.RawMessage) (bool, error) {
+    if !b.Meta.RequiresConfirmation {
+        return true, nil
+    }
+    fmt.Printf("Allow %s? [y/N] ", b.Tool.Name)
+    var answer string
+    fmt.Scanln(&answer)
+    return strings.ToLower(answer) == "y", nil
+}))
+~~~
 
 Middleware clarification:
 
@@ -668,7 +731,7 @@ Principles:
 - metadata is advisory and inspectable, not a hidden permission engine
 - logging and confirmation should be interfaces supplied by the application, not hard dependencies on a logging framework or UI
 
-### 5. Explicit context management
+### 6. Explicit context management
 
 Priority: high.
 
@@ -705,9 +768,9 @@ Principles:
 - summarization should usually be application-driven, not exposed as a model-callable tool
 - context management should be part of the recommended practical agent recipe, not an obscure advanced feature
 
-### 6. Basic, extensible agent block
+### 7. Basic, extensible agent block
 
-Priority: high.
+Priority: high. This is the P1 centerpiece.
 
 Problem:
 
@@ -716,6 +779,8 @@ The primitive `Loop` is intentionally explicit, but real applications should not
 Goal:
 
 Provide a basic, extensible agent block: an assembled primitive with batteries included, but designed to be customized, embedded, and built on.
+
+This is the item that makes `gocode` feel like it has a blessed path. Once `Assistant.Step` exists with context trimming built in, the examples improve dramatically, the repo explainer example becomes a tight loop with no boilerplate, and the recipes section becomes genuinely copy-pasteable. Items 1–6 build the parts; this item assembles them into a shape developers can hand to a colleague and say "start here."
 
 The goal is not to ship a complete Claude Code-style product. The goal is to provide the reusable agent block that many Claude Code-style systems, repo assistants, internal copilots, and tool-using applications need.
 
@@ -762,9 +827,56 @@ In short:
 
 > An assembled agent primitive, not an application runner.
 
-### 7. Provider setup helpers
+### 8. Streaming retry semantics
 
-Priority: medium-high.
+Priority: high. Decide and document before P2 work multiplies the problem.
+
+Problem:
+
+When `callWithRetry` fires a retry mid-stream, the `onToken` callback is invoked again from the beginning of the response. In a CLI printing tokens live to stdout, the user sees duplicate partial text. In a web SSE handler, the client receives duplicate events. This is currently documented but not mitigated, and the problem compounds as more streaming use cases are added in P2.
+
+Goal:
+
+Pick a design and commit to it before the `Assistant` block, the HTTP/SSE example, and other streaming patterns are built on top of the current behavior.
+
+Three options:
+
+**Option A — Pass retry attempt number to the callback.**
+The `onToken` signature gains an attempt parameter. Callers know to reset their output buffer when attempt > 0.
+
+~~~go
+onToken func(delta ContentBlock, attempt int)
+~~~
+
+Con: changes every existing streaming caller.
+
+**Option B — Add an `onRetry()` callback alongside `onToken`.**
+When a retry fires, `onRetry()` is called first, giving the caller a chance to clear state or emit a reset signal before the new stream begins.
+
+~~~go
+onRetry func()
+~~~
+
+Pro: `onToken` signature stays the same. Con: callers must coordinate two callbacks.
+
+**Option C — Document the pattern and provide a stateful wrapper.**
+Keep the current signatures. Provide a `NewStreamBuffer` helper that wraps `onToken`, detects retries via a sequence counter, and exposes a clean `Text() string` and `Reset()` method. Callers who need deduplication use the wrapper; callers who don't ignore the issue.
+
+Pro: zero breaking changes, opt-in. Con: the footgun remains for callers who don't know to look for it.
+
+Recommendation: Option C. It preserves the existing simple callback contract, is opt-in, and the wrapper pattern is consistent with the library's philosophy of providing thin helpers over primitives. The wrapper should be included in the streaming recipe and used in the HTTP/SSE example.
+
+Principles:
+
+- do not silently deduplicate tokens (would hide retry behavior from callers)
+- do not buffer the entire stream before delivery (defeats the purpose of streaming)
+- keep the `onToken` signature compatible unless the design clearly requires a break
+- document the retry-callback interaction prominently in the streaming recipe
+- resolve this before building the HTTP/SSE service example, which will hit it immediately
+
+### 9. Provider setup helpers
+
+Priority: done.
 
 Problem:
 
@@ -774,30 +886,30 @@ Goal:
 
 Offer small convenience helpers for common setup without hiding configuration.
 
-Possible APIs:
+Implemented:
 
 ```go
-provider, err := agent.AnthropicFromEnv()
-provider, err := agent.OpenAIFromEnv()
-provider, err := agent.OpenRouterFromEnv()
-```
+// Provider-level (for callers who need custom MaxTokens, retry, or HTTP config)
+provider, err := agent.NewAnthropicProviderFromEnv()
+provider, err := agent.NewOpenAIProviderFromEnv()
+provider, err := agent.NewOpenRouterProviderFromEnv()
 
-Potentially:
-
-```go
+// Client-level (single-line setup for the simple case)
 client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+client, err := agent.NewOpenAIClientFromEnv("gpt-4o")
+client, err := agent.NewOpenRouterClientFromEnv("anthropic/claude-sonnet-4-6")
 ```
 
 Principles:
 
-- helpers should be clearly named
-- missing environment variables should return normal errors
-- explicit provider constructors remain the canonical path
+- helpers are clearly named — provider, env var source, and level are all explicit
+- missing environment variables return normal errors naming the expected variable
+- explicit provider constructors remain the canonical path for custom config
 - no global default client
 - no package-level hidden state
-- no automatic provider selection unless explicitly requested
+- no automatic provider selection
 
-### 8. Recipes documentation
+### 10. Recipes documentation
 
 Priority: medium-high.
 
@@ -837,9 +949,9 @@ Principles:
 - recipes should show the primitive underneath
 - recipes should avoid fake tools when a real local deterministic tool is possible
 
-### 9. One compelling example app
+### 11. One compelling example app
 
-Priority: high.
+Priority: high. Build this as soon as the `Assistant` block and `workspace edit file` exist — it acts as the integration test for P1.
 
 Problem:
 
@@ -928,6 +1040,14 @@ Problem:
 
 Real applications need conversation history to survive across requests and restarts.
 
+**Two-tier persistence model.**
+
+Persistence is two distinct problems with different solutions:
+
+- **Conversation-level persistence**: save and reload `[]Message`. Because history is append-only and fully JSON-serializable, this maps directly to a `Store` interface. Crash before a step — reload history, resume from the last good state. Human-in-the-loop pause/resume, conversation forking, session sharing: all handled. This covers the 80% case.
+
+- **Durable tool execution**: if the agent crashes *while a tool is executing*, history has a `tool_use` block with no matching `tool_result`. Reloading history and resuming may re-execute a side-effectful tool — file writes, API calls, payments. This is the exactly-once problem. It is addressed separately in P2.3 via a `WithIdempotency` middleware that uses tool-use IDs as idempotency keys.
+
 Goal:
 
 Add a minimal `Session` and `Store` abstraction that remains a transparent wrapper around `[]Message`.
@@ -978,7 +1098,57 @@ session.History = result.Messages
 
 The core should not add a `Runner` abstraction that owns this flow.
 
-### 3. Observability hooks
+### 3. Durable tool execution
+
+Priority: medium.
+
+Problem:
+
+Conversation persistence (saving and reloading `[]Message`) handles the common case cleanly, but it does not handle mid-tool-call crashes.
+
+If an agent crashes while a tool is executing, history contains a `tool_use` block with no matching `tool_result`. On reload, you face a genuine ambiguity: did the tool finish? Did it partially complete? Re-executing a side-effectful tool — a file write, an API call, a database mutation — may cause double execution. With concurrent tool execution this is sharper: if three tools run in parallel and the process dies after two complete, history does not record which ones finished.
+
+Tool-use IDs (already stable and unique in the message format) can serve as idempotency keys.
+
+Goal:
+
+Provide a `WithIdempotency` middleware and a minimal `ToolResultStore` interface. Before executing a tool, the middleware checks the store; if a result for that tool-use ID already exists, it returns the cached result without re-executing. After executing, it persists the result to the store. On crash-resume, any tool that completed before the crash returns its cached result; any tool that did not complete re-executes cleanly.
+
+Possible API:
+
+~~~go
+type ToolResultStore interface {
+    Get(ctx context.Context, toolUseID string) (string, bool, error)
+    Put(ctx context.Context, toolUseID string, result string) error
+}
+
+func WithIdempotency(store ToolResultStore) Middleware
+~~~
+
+Resume pattern:
+
+~~~go
+// Load history (may contain unmatched tool_use blocks from a crash).
+history, _ := convStore.Load(ctx, sessionID)
+
+// Completed tools return cached results; incomplete ones re-execute.
+toolset = toolset.Wrap(agent.WithIdempotency(idempotencyStore))
+
+result, err := a.Step(ctx, history)
+~~~
+
+Built-in stores: in-memory (tests and development), file-backed (single-instance apps). External stores (Redis, SQL) are left to callers.
+
+Principles:
+
+- tool-use IDs are already stable in the message format — no new ID scheme needed
+- the middleware is opt-in; most apps that use idempotent tools or short-lived processes do not need it
+- the store interface is minimal and implementation-agnostic
+- this gets you to "no duplicate execution at the agent level after crash-resume"
+- it does not guarantee exactly-once delivery across all infrastructure — external state changes still require tool-level idempotency or rollback; document the boundary clearly
+- the middleware composes with logging, confirmation, and timeout wrappers in the normal way
+
+### 4. Observability hooks
 
 Priority: medium.
 
@@ -1002,6 +1172,18 @@ type Hooks struct {
 }
 ```
 
+**OpenTelemetry adapter.**
+
+The hooks above emit the right events; what is missing is a thin adapter that wires them to OpenTelemetry spans. Provide an `agent/otel` sub-package:
+
+~~~go
+// otel.HooksFromTracer returns an agent.Hooks that creates OTel spans
+// around each step and, once per-tool-call hooks exist, around each tool call.
+func HooksFromTracer(tracer trace.Tracer) agent.Hooks
+~~~
+
+With this adapter, Jaeger, Honeycomb, Datadog, and any other OTel-compatible backend work out of the box. The adapter is a translation layer over the hooks that already exist — no changes to the core package are needed.
+
 Principles:
 
 - zero value means no hooks
@@ -1010,8 +1192,9 @@ Principles:
 - hooks should not become middleware
 - hooks should not hide execution flow
 - callbacks should be documented as synchronous or asynchronous
+- the OTel adapter is a separate sub-package with its own dependency on `go.opentelemetry.io/otel`; the core `agent` package has no OTel dependency
 
-### 4. Extended model configuration
+### 5. Extended model configuration
 
 Priority: medium.
 
@@ -1048,7 +1231,7 @@ Principles:
 - keep the common case short
 - allow advanced users to take on complexity explicitly
 
-### 5. Testing helpers
+### 6. Testing helpers
 
 Priority: medium.
 
@@ -1088,7 +1271,7 @@ Principles:
 - do not assert exact LLM text in library examples
 - encourage testing history shape, tool calls, errors, and usage
 
-### 6. ADK comparison doc
+### 7. ADK comparison doc
 
 Priority: medium.
 
@@ -1130,7 +1313,7 @@ Principles:
 - emphasize visible control flow
 - do not frame the goal as feature parity
 
-### 7. HTTP/SSE service example
+### 8. HTTP/SSE service example
 
 Priority: medium.
 
@@ -1282,25 +1465,28 @@ You can build many of these things on top of `gocode`, but the core library shou
 
 | Order | Item | Priority | Status |
 |---|---|---|---|
-| 1 | Safe pre-built tools | P1 | Next |
-| 2 | Tool bindings/toolsets/dispatch helpers | P1 | Next |
-| 3 | Explicit context management | P1 | Next |
-| 4 | Basic, extensible agent block | P1 | Next |
-| 5 | Recipes documentation | P1 | Next |
-| 6 | Compelling example app | P1 | Next |
-| 7 | Native MCP support | P1 | Next |
-| 8 | Native skills support | P1 | Next |
-| 9 | Provider setup helpers | P1 | Next |
-| 10 | Assistant hardening | P2 | Planned |
-| 11 | Boring sessions, but no runner | P2 | Planned |
-| 12 | Observability hooks | P2 | Planned |
-| 13 | Extended model configuration | P2 | Planned |
-| 14 | Testing helpers | P2 | Planned |
-| 15 | ADK comparison doc | P2 | Planned |
-| 16 | HTTP/SSE service example | P2 | Planned |
-| 17 | Evaluation helpers | P3 | Future |
-| 18 | Lightweight multi-agent composition | P3 | Future / cautious |
-| 19 | Cross-session memory | P3 | Future / likely separate package |
+| 1 | Provider setup helpers | P1 | Done |
+| 2 | Parallel tool execution | P1 | Done |
+| 3 | Safe pre-built tools (incl. `workspace edit file`) | P1 | Done |
+| 4 | Native MCP support | P1 | Done |
+| 5 | Native skills support | P1 | Next |
+| 6 | Tool bindings/toolsets/dispatch helpers (incl. `WithConfirmation`) | P1 | Done |
+| 7 | Explicit context management | P1 | Done |
+| 8 | Basic, extensible agent block (P1 centerpiece) | P1 | Done |
+| 9 | Streaming retry semantics | P1 | Next |
+| 10 | Compelling example app (repo explainer) | P1 | Next |
+| 11 | Recipes documentation | P1 | Next |
+| 12 | Assistant hardening | P2 | Planned |
+| 13 | Boring sessions, but no runner | P2 | Planned |
+| 14 | Durable tool execution (`WithIdempotency`) | P2 | Planned |
+| 15 | Observability hooks + OpenTelemetry adapter | P2 | Planned |
+| 16 | Extended model configuration | P2 | Planned |
+| 17 | Testing helpers | P2 | Planned |
+| 18 | ADK comparison doc | P2 | Planned |
+| 19 | HTTP/SSE service example | P2 | Planned |
+| 20 | Evaluation helpers | P3 | Future |
+| 21 | Lightweight multi-agent composition | P3 | Future / cautious |
+| 22 | Cross-session memory | P3 | Future / likely separate package |
 
 ---
 
@@ -1310,14 +1496,21 @@ The core primitives are now in place. The next phase should make those primitive
 
 The highest-leverage work is:
 
-1. safe pre-built tools
-2. toolsets and dispatch helpers
-3. explicit context management
-4. a basic, extensible agent block
-5. small, copy-pasteable recipes
-6. one compelling real example app
-7. MCP support as a transparent external tool adapter
-8. skills as inspectable bundles of instructions, tools, examples, and metadata
+1. parallel tool execution — correctness fix that everything builds on
+2. safe pre-built tools, including `workspace edit file` as the minimum mutation primitive
+3. native MCP and skills support for progressive prompt discovery and skill composition
+4. toolsets, dispatch helpers, and `WithConfirmation` as the human-in-the-loop primitive
+5. explicit context management
+6. a basic, extensible `Assistant` block — the P1 centerpiece that assembles all the above
+7. streaming retry semantics locked down before P2 multiplies the surface
+8. one compelling real example app that acts as the integration test for P1
+9. small, copy-pasteable recipes
+
+Production helpers (P2) close the remaining gaps:
+
+- **Sessions + Store**: conversation-level persistence; history is the state, the store is the sink
+- **Durable tool execution**: `WithIdempotency` + `ToolResultStore` for crash-resume without double execution
+- **OpenTelemetry adapter**: `agent/otel` wires existing hooks to spans; no OTel dependency in core
 
 Production helpers should follow the same rule:
 

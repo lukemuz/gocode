@@ -258,6 +258,84 @@ func TestWithResultLimitBelowMax(t *testing.T) {
 	}
 }
 
+func TestWithConfirmationApproved(t *testing.T) {
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("greet", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "hello", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithConfirmation(func(_ context.Context, _ ToolBinding, _ json.RawMessage) (bool, error) {
+		return true, nil
+	}))
+	out, err := wrapped.Dispatch()["greet"](context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "hello" {
+		t.Errorf("expected %q, got %q", "hello", out)
+	}
+}
+
+func TestWithConfirmationDenied(t *testing.T) {
+	var called bool
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("greet", func(_ context.Context, _ json.RawMessage) (string, error) {
+			called = true
+			return "hello", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithConfirmation(func(_ context.Context, _ ToolBinding, _ json.RawMessage) (bool, error) {
+		return false, nil
+	}))
+	out, err := wrapped.Dispatch()["greet"](context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Error("tool should not have been called when denied")
+	}
+	if !strings.Contains(out, "not approved") {
+		t.Errorf("expected denial message containing 'not approved', got %q", out)
+	}
+}
+
+func TestWithConfirmationError(t *testing.T) {
+	boom := errors.New("user unavailable")
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("greet", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "hello", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithConfirmation(func(_ context.Context, _ ToolBinding, _ json.RawMessage) (bool, error) {
+		return false, boom
+	}))
+	_, err := wrapped.Dispatch()["greet"](context.Background(), nil)
+	if !errors.Is(err, boom) {
+		t.Errorf("expected %v, got %v", boom, err)
+	}
+}
+
+func TestWithConfirmationReceivesBinding(t *testing.T) {
+	var receivedName string
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("special", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "ok", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithConfirmation(func(_ context.Context, b ToolBinding, _ json.RawMessage) (bool, error) {
+		receivedName = b.Tool.Name
+		return true, nil
+	}))
+	wrapped.Dispatch()["special"](context.Background(), nil)
+	if receivedName != "special" {
+		t.Errorf("expected binding name %q, got %q", "special", receivedName)
+	}
+}
+
 func TestWrapMiddlewareOrder(t *testing.T) {
 	// Each middleware records when its pre- and post-execution hooks run.
 	// We verify that middleware is applied outermost-first: mw1 wraps mw2 wraps the tool.

@@ -69,9 +69,7 @@ func main() {
 		"read_file": readFileFn,
 	}
 
-	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
-		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-	})
+	provider, err := agent.NewAnthropicProviderFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}

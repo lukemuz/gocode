@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -253,6 +254,27 @@ func NewOpenAIProvider(cfg OpenAIConfig) (*OpenAIProvider, error) {
 		cfg.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return &OpenAIProvider{cfg: cfg}, nil
+}
+
+// NewOpenAIProviderFromEnv creates an OpenAIProvider using the OPENAI_API_KEY
+// environment variable. Returns an error if the variable is unset or empty.
+func NewOpenAIProviderFromEnv() (*OpenAIProvider, error) {
+	key := os.Getenv("OPENAI_API_KEY")
+	if key == "" {
+		return nil, fmt.Errorf("agent: OPENAI_API_KEY environment variable is not set")
+	}
+	return NewOpenAIProvider(OpenAIConfig{APIKey: key})
+}
+
+// NewOpenAIClientFromEnv creates a Client backed by the OpenAI provider,
+// reading the API key from OPENAI_API_KEY. model is the model identifier
+// (e.g. "gpt-4o", "gpt-4o-mini").
+func NewOpenAIClientFromEnv(model string) (*Client, error) {
+	provider, err := NewOpenAIProviderFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return New(Config{Provider: provider, Model: model})
 }
 
 // Call implements Provider for OpenAI.

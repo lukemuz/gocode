@@ -1,7 +1,10 @@
-// Package workspace provides a safe, sandboxed set of read-only filesystem
-// tools rooted at a configurable directory. All path arguments are resolved
-// relative to the root and validated to prevent directory traversal. These are
-// the initial core built-ins for coding-agent use cases described in the roadmap.
+// Package workspace provides a safe, sandboxed set of filesystem tools rooted
+// at a configurable directory. All path arguments are resolved relative to the
+// root and validated to prevent directory traversal.
+//
+// Use NewReadOnly for the five read-only tools (list_directory, find_files,
+// search_text, read_file, file_info). Use New to also include edit_file; pair
+// it with the agent.WithConfirmation middleware to gate writes.
 package workspace
 
 import (
@@ -59,6 +62,20 @@ type Workspace struct {
 	maxFileBytes int64
 	maxResults   int
 	bindings     []agent.ToolBinding
+}
+
+// New creates a Workspace with all six tools: the five read-only tools from
+// NewReadOnly plus edit_file for in-place text replacement. The edit_file tool
+// carries RequiresConfirmation: true metadata; pair the returned Toolset with
+// agent.WithConfirmation to gate writes.
+// Returns an error if cfg.Root is empty or cannot be resolved to an absolute path.
+func New(cfg Config) (*Workspace, error) {
+	w, err := NewReadOnly(cfg)
+	if err != nil {
+		return nil, err
+	}
+	w.bindings = append(w.bindings, w.buildEditBinding())
+	return w, nil
 }
 
 // NewReadOnly creates a Workspace with the five core read-only tools:
@@ -162,6 +179,13 @@ type fileInfoInput struct {
 	Path string `json:"path"`
 }
 
+type editFileInput struct {
+	Path          string `json:"path"`
+	OldString     string `json:"old_string"`
+	NewString     string `json:"new_string"`
+	ExpectedCount int    `json:"expected_count"`
+}
+
 // ---- binding construction ---------------------------------------------------
 
 func (w *Workspace) buildBindings() []agent.ToolBinding {
@@ -227,6 +251,30 @@ func (w *Workspace) buildBindings() []agent.ToolBinding {
 		{Tool: readFileTool, Func: agent.TypedToolFunc(w.readFile), Meta: meta},
 		{Tool: fileInfoTool, Func: agent.TypedToolFunc(w.fileInfo), Meta: meta},
 	}
+}
+
+func (w *Workspace) buildEditBinding() agent.ToolBinding {
+	editMeta := agent.ToolMetadata{
+		Source:               "tools/workspace",
+		ReadOnly:             false,
+		Destructive:          true,
+		Filesystem:           true,
+		RequiresConfirmation: true,
+	}
+	editFileTool, _ := agent.NewTool(
+		"edit_file",
+		"Replaces all occurrences of old_string with new_string in a file. "+
+			"Returns an error if old_string is not found. "+
+			"Set expected_count to a positive integer to assert the exact number of replacements; "+
+			"the edit is rejected when the actual count differs.",
+		agent.Object(
+			agent.String("path", "File path relative to the workspace root.", agent.Required()),
+			agent.String("old_string", "Exact string to find and replace.", agent.Required()),
+			agent.String("new_string", "Replacement string.", agent.Required()),
+			agent.Integer("expected_count", "Expected number of occurrences. When non-zero, the edit is rejected if the actual count differs."),
+		),
+	)
+	return agent.ToolBinding{Tool: editFileTool, Func: agent.TypedToolFunc(w.editFile), Meta: editMeta}
 }
 
 // ---- tool implementations ---------------------------------------------------
@@ -453,4 +501,38 @@ func (w *Workspace) fileInfo(_ context.Context, in fileInfoInput) (string, error
 		return "", fmt.Errorf("file_info: marshal result: %w", err)
 	}
 	return string(data), nil
+}
+
+func (w *Workspace) editFile(_ context.Context, in editFileInput) (string, error) {
+	if in.Path == "" {
+		return "", fmt.Errorf("edit_file: path is required")
+	}
+	if in.OldString == "" {
+		return "", fmt.Errorf("edit_file: old_string is required")
+	}
+	abs, err := w.safePath(in.Path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("edit_file: %w", err)
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return "", fmt.Errorf("edit_file: %w", err)
+	}
+	content := string(data)
+	count := strings.Count(content, in.OldString)
+	if count == 0 {
+		return "", fmt.Errorf("edit_file: old_string not found in %q", in.Path)
+	}
+	if in.ExpectedCount > 0 && count != in.ExpectedCount {
+		return "", fmt.Errorf("edit_file: expected %d occurrence(s) of old_string, found %d", in.ExpectedCount, count)
+	}
+	updated := strings.ReplaceAll(content, in.OldString, in.NewString)
+	if err := os.WriteFile(abs, []byte(updated), info.Mode()); err != nil {
+		return "", fmt.Errorf("edit_file: %w", err)
+	}
+	return fmt.Sprintf("replaced %d occurrence(s) in %s", count, in.Path), nil
 }

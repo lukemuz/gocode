@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 )
 
 const openRouterDefaultBaseURL = "https://openrouter.ai"
@@ -32,6 +33,28 @@ func NewOpenRouterProvider(cfg OpenRouterConfig) (*OpenRouterProvider, error) {
 		cfg.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return &OpenRouterProvider{cfg: cfg}, nil
+}
+
+// NewOpenRouterProviderFromEnv creates an OpenRouterProvider using the
+// OPENROUTER_API_KEY environment variable. Returns an error if the variable
+// is unset or empty.
+func NewOpenRouterProviderFromEnv() (*OpenRouterProvider, error) {
+	key := os.Getenv("OPENROUTER_API_KEY")
+	if key == "" {
+		return nil, fmt.Errorf("agent: OPENROUTER_API_KEY environment variable is not set")
+	}
+	return NewOpenRouterProvider(OpenRouterConfig{APIKey: key})
+}
+
+// NewOpenRouterClientFromEnv creates a Client backed by the OpenRouter provider,
+// reading the API key from OPENROUTER_API_KEY. model is any model string
+// supported by OpenRouter (e.g. "anthropic/claude-sonnet-4-6").
+func NewOpenRouterClientFromEnv(model string) (*Client, error) {
+	provider, err := NewOpenRouterProviderFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return New(Config{Provider: provider, Model: model})
 }
 
 // Call implements Provider for OpenRouter.

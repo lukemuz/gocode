@@ -271,3 +271,159 @@ func TestAbsolutePathRejected(t *testing.T) {
 		t.Fatal("want error for absolute path, got nil")
 	}
 }
+
+// ---- New (read-write) workspace tests ---------------------------------------
+
+func newWS_RW(t *testing.T, root string) *workspace.Workspace {
+	t.Helper()
+	ws, err := workspace.New(workspace.Config{Root: root})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return ws
+}
+
+func TestNewHasSixBindings(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS_RW(t, root)
+	ts := ws.Toolset()
+	if len(ts.Bindings) != 6 {
+		t.Errorf("want 6 bindings, got %d", len(ts.Bindings))
+	}
+}
+
+func TestEditFileReplacesAllOccurrences(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "edit.txt"), []byte("hello world\nhello go\n"), 0644)
+	ws := newWS_RW(t, root)
+
+	out := callTool(t, ws, "edit_file", map[string]any{
+		"path":       "edit.txt",
+		"old_string": "hello",
+		"new_string": "goodbye",
+	})
+	if !strings.Contains(out, "2") {
+		t.Errorf("expected '2' in output, got: %s", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, "edit.txt"))
+	if strings.Contains(string(data), "hello") {
+		t.Errorf("expected all occurrences replaced, file now: %s", data)
+	}
+	if !strings.Contains(string(data), "goodbye") {
+		t.Errorf("expected replacement text present, file now: %s", data)
+	}
+}
+
+func TestEditFileExpectedCountMatch(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "f.txt"), []byte("a b a"), 0644)
+	ws := newWS_RW(t, root)
+
+	out := callTool(t, ws, "edit_file", map[string]any{
+		"path":           "f.txt",
+		"old_string":     "a",
+		"new_string":     "z",
+		"expected_count": 2,
+	})
+	if !strings.Contains(out, "2") {
+		t.Errorf("expected '2' in output, got: %s", out)
+	}
+}
+
+func TestEditFileExpectedCountMismatch(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "f.txt"), []byte("a b a"), 0644)
+	ws := newWS_RW(t, root)
+
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{
+		"path":           "f.txt",
+		"old_string":     "a",
+		"new_string":     "z",
+		"expected_count": 1,
+	})
+	_, err := dispatch["edit_file"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error for expected_count mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "expected 1") {
+		t.Errorf("error should mention expected count, got: %v", err)
+	}
+}
+
+func TestEditFileOldStringNotFound(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello world"), 0644)
+	ws := newWS_RW(t, root)
+
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{
+		"path":       "f.txt",
+		"old_string": "missing",
+		"new_string": "x",
+	})
+	_, err := dispatch["edit_file"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error when old_string not found, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention not found, got: %v", err)
+	}
+}
+
+func TestEditFileTraversalRejected(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS_RW(t, root)
+
+	dispatch := ws.Dispatch()
+	raw, _ := json.Marshal(map[string]any{
+		"path":       "../secret",
+		"old_string": "x",
+		"new_string": "y",
+	})
+	_, err := dispatch["edit_file"](context.Background(), raw)
+	if err == nil {
+		t.Fatal("want error for path traversal, got nil")
+	}
+}
+
+func TestEditFilePreservesPermissions(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "perm.txt")
+	os.WriteFile(path, []byte("old content"), 0600)
+	ws := newWS_RW(t, root)
+
+	callTool(t, ws, "edit_file", map[string]any{
+		"path":       "perm.txt",
+		"old_string": "old",
+		"new_string": "new",
+	})
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode() != 0600 {
+		t.Errorf("expected mode 0600, got %v", info.Mode())
+	}
+}
+
+func TestEditFileMetadataFlags(t *testing.T) {
+	root := setupTestDir(t)
+	ws := newWS_RW(t, root)
+	ts := ws.Toolset()
+	for _, b := range ts.Bindings {
+		if b.Tool.Name == "edit_file" {
+			if b.Meta.ReadOnly {
+				t.Error("edit_file should not be ReadOnly")
+			}
+			if !b.Meta.Destructive {
+				t.Error("edit_file should be Destructive")
+			}
+			if !b.Meta.RequiresConfirmation {
+				t.Error("edit_file should RequiresConfirmation")
+			}
+			return
+		}
+	}
+	t.Fatal("edit_file binding not found in toolset")
+}
