@@ -166,3 +166,23 @@ func WithPanicRecovery() Middleware {
 		}
 	}
 }
+
+// WithConfirmation returns a Middleware that calls prompt before each tool
+// invocation. If prompt returns false the tool is skipped and a descriptive
+// message is returned to the model instead of executing the tool. If prompt
+// returns an error that error becomes a hard tool error and is surfaced to
+// the caller as usual.
+func WithConfirmation(prompt func(ctx context.Context, binding ToolBinding, input json.RawMessage) (bool, error)) Middleware {
+	return func(b ToolBinding) ToolFunc {
+		return func(ctx context.Context, input json.RawMessage) (string, error) {
+			ok, err := prompt(ctx, b, input)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				return fmt.Sprintf("tool %q was not approved and was not executed", b.Tool.Name), nil
+			}
+			return b.Func(ctx, input)
+		}
+	}
+}
