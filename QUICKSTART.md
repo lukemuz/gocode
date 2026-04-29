@@ -2,13 +2,9 @@
 
 `gocode` is a small Go library for LLM calls, tools, and agent loops.
 
-The goal is simple:
-
 > Plain data. Plain functions. No framework magic.
 
-You own the conversation history. You own the tools. You own the loop.
-
-This guide gets you from zero to a working model call, then adds one simple tool loop. For provider details, streaming, retries, testing, and production patterns, see `README.md`.
+This guide gets you from zero to one model call, then one tool loop. For the full reference, see [`README.md`](README.md).
 
 ## Install
 
@@ -16,13 +12,13 @@ This guide gets you from zero to a working model call, then adds one simple tool
 go get github.com/lukemuz/gocode/agent
 ~~~
 
-Set an API key. This guide uses Anthropic:
+This guide uses Anthropic:
 
 ~~~bash
-export ANTHROPIC_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
 ~~~
 
-OpenAI and OpenRouter work similarly. See `README.md` for provider setup.
+OpenAI and OpenRouter work similarly; see the README for provider setup.
 
 ## 1. Make one LLM call
 
@@ -32,45 +28,31 @@ Create `main.go`:
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"os"
+    "context"
+    "fmt"
+    "log"
 
-	"github.com/lukemuz/gocode/agent"
+    "github.com/lukemuz/gocode/agent"
 )
 
 func main() {
-	ctx := context.Background()
+    ctx := context.Background()
 
-	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
-		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+    client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	client, err := agent.New(agent.Config{
-		Provider:  provider,
-		Model:     agent.ModelSonnet,
-		MaxTokens: 1024,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+    history := []agent.Message{
+        agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
+    }
 
-	system := "You are a concise assistant."
+    reply, err := client.Ask(ctx, "You are a concise assistant.", history)
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	history := []agent.Message{
-		agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
-	}
-
-	reply, err := client.Ask(ctx, system, history)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println(agent.TextContent(reply))
+    fmt.Println(agent.TextContent(reply))
 }
 ~~~
 
@@ -80,199 +62,213 @@ Run it:
 go run .
 ~~~
 
-That is the smallest useful shape:
+The important part is that `history` is just data. There is no hidden session or framework state. Store it, append to it, trim it, or test it however you want.
 
-1. create a provider
-2. create a client
-3. create message history
-4. call `Ask`
+## 2. Continue the conversation
 
-The important part is that `history` is just data:
+`Ask` does not mutate history. Append the reply yourself:
 
 ~~~go
-history := []agent.Message{
-	agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
-}
+history = append(history, reply)
+history = append(history, agent.NewUserMessage("Pick the most practical idea and explain the first implementation step."))
+
+reply, err = client.Ask(ctx, "You are a concise assistant.", history)
 ~~~
 
-There is no hidden session or framework state. Store it, trim it, append to it, or test it however you want.
+That is the core data model: `[]agent.Message` in, `agent.Message` out.
 
-## 2. Add one tool
-
-Now give the model a tool.
+## 3. Add one tool
 
 Tools have two parts:
 
 1. a definition the model sees
-2. a Go function you run
+2. a Go function your program runs
 
-This example gives the model access to the current time.
-
-Replace `main.go` with:
+Use the built-in clock tool for the first loop:
 
 ~~~go
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"os"
-	"time"
+    "context"
+    "fmt"
+    "log"
 
-	"github.com/lukemuz/gocode/agent"
+    "github.com/lukemuz/gocode/agent"
+    "github.com/lukemuz/gocode/agent/tools/clock"
 )
 
 func main() {
-	ctx := context.Background()
+    ctx := context.Background()
 
-	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
-		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+    client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	client, err := agent.New(agent.Config{
-		Provider:  provider,
-		Model:     agent.ModelSonnet,
-		MaxTokens: 1024,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+    clockTool := clock.New()
+    toolset := clockTool.Toolset()
 
-	nowTool, err := agent.NewTool("now", "Get the current time.", agent.Object())
-	if err != nil {
-		log.Fatal(err)
-	}
+    history := []agent.Message{
+        agent.NewUserMessage("What time is it? Then give me one sentence about what to work on next."),
+    }
 
-	tools := []agent.Tool{nowTool}
+    result, err := client.Loop(
+        ctx,
+        "You are a concise assistant. Use tools when they help.",
+        history,
+        toolset.Tools(),
+        toolset.Dispatch(),
+        5,
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	dispatch := map[string]agent.ToolFunc{
-		"now": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return time.Now().Format(time.RFC3339), nil
-		},
-	}
-
-	system := "You are a concise assistant. Use tools when they help."
-
-	history := []agent.Message{
-		agent.NewUserMessage("What time is it? Then give me a one-sentence suggestion for what to work on next."),
-	}
-
-	result, err := client.Loop(ctx, system, history, tools, dispatch, 5)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	last := result.Messages[len(result.Messages)-1]
-	fmt.Println(agent.TextContent(last))
+    last := result.Messages[len(result.Messages)-1]
+    fmt.Println(agent.TextContent(last))
 }
 ~~~
-
-Run it:
-
-~~~bash
-go run .
-~~~
-
-The model can now decide to call `now`.
 
 `Loop` handles the cycle:
 
 1. call the model
 2. detect requested tool calls
-3. run your Go function from `dispatch`
-4. append the tool result to the message history
+3. run the matching Go function
+4. append tool results to the message history
 5. call the model again
 6. stop when the model returns a final answer
 
-The result contains the full updated history:
+You still own the resulting history:
 
 ~~~go
-result.Messages
+history = result.Messages
 ~~~
 
-You still own that data.
+## 4. Define your own typed tool
 
-## 3. A tool with input
-
-The `now` tool has no input. Tools with input use JSON schema for the model-facing definition and `json.RawMessage` for the Go handler.
-
-Here is a small calculator tool definition:
+For application tools, use `NewTypedTool` to pair a model-facing schema with a typed Go handler.
 
 ~~~go
-calculator, err := agent.NewTool("calculator", "Do basic arithmetic.", agent.Object(
-	agent.String("operation", "One of: add, subtract, multiply", agent.Required(), agent.Enum("add", "subtract", "multiply")),
-	agent.Number("a", "First number", agent.Required()),
-	agent.Number("b", "Second number", agent.Required()),
-))
+type CalculatorInput struct {
+    Operation string  `json:"operation"`
+    A         float64 `json:"a"`
+    B         float64 `json:"b"`
+}
+
+calculator, calculatorFunc, err := agent.NewTypedTool(
+    "calculator",
+    "Do basic arithmetic.",
+    agent.Object(
+        agent.String("operation", "One of: add, subtract, multiply", agent.Required(), agent.Enum("add", "subtract", "multiply")),
+        agent.Number("a", "First number", agent.Required()),
+        agent.Number("b", "Second number", agent.Required()),
+    ),
+    func(ctx context.Context, in CalculatorInput) (string, error) {
+        switch in.Operation {
+        case "add":
+            return fmt.Sprintf("%g", in.A+in.B), nil
+        case "subtract":
+            return fmt.Sprintf("%g", in.A-in.B), nil
+        case "multiply":
+            return fmt.Sprintf("%g", in.A*in.B), nil
+        default:
+            return "", fmt.Errorf("unknown operation: %s", in.Operation)
+        }
+    },
+)
 if err != nil {
-	log.Fatal(err)
+    log.Fatal(err)
 }
+
+_ = calculator
+_ = calculatorFunc
 ~~~
 
-And the matching handler:
+Use it like any other tool:
 
 ~~~go
-dispatch := map[string]agent.ToolFunc{
-	"calculator": func(ctx context.Context, input json.RawMessage) (string, error) {
-		var params struct {
-			Operation string  `json:"operation"`
-			A         float64 `json:"a"`
-			B         float64 `json:"b"`
-		}
+tools := []agent.Tool{calculator}
+dispatch := map[string]agent.ToolFunc{calculator.Name: calculatorFunc}
+~~~
 
-		if err := json.Unmarshal(input, &params); err != nil {
-			return "", err
-		}
+This stays explicit:
 
-		switch params.Operation {
-		case "add":
-			return fmt.Sprintf("%f", params.A+params.B), nil
-		case "subtract":
-			return fmt.Sprintf("%f", params.A-params.B), nil
-		case "multiply":
-			return fmt.Sprintf("%f", params.A*params.B), nil
-		default:
-			return "", fmt.Errorf("unknown operation: %s", params.Operation)
-		}
-	},
+- the model sees the schema you provide
+- your handler receives a typed Go value
+- dispatch is a normal map
+- there is no reflection-only registry or hidden runtime
+
+## 5. Compose built-in tools
+
+Built-in tools expose `Toolset` values, so they compose cleanly.
+
+~~~go
+clockTool := clock.New()
+ws, err := workspace.NewReadOnly(workspace.Config{Root: "."})
+if err != nil {
+    log.Fatal(err)
 }
+
+toolset, err := agent.Join(clockTool.Toolset(), ws.Toolset())
+if err != nil {
+    log.Fatal(err)
+}
+
+toolset = toolset.Wrap(
+    agent.WithTimeout(5*time.Second),
+    agent.WithResultLimit(20_000),
+)
 ~~~
 
-This is intentionally explicit:
+Use `workspace.NewReadOnly` for safe filesystem reads. Use `workspace.New` only when you want the `edit_file` tool, and consider adding `agent.WithConfirmation` before writes can run.
 
-- the model sees exactly the schema you provide (now built ergonomically with `Object`/`String`/`Number`/`Required`/`Enum`)
-- your Go code parses exactly the input you expect
-- there is no reflection-based magic
-- the dispatch table is a normal Go map
+## 6. Use an Assistant when the glue repeats
 
-The schema builders reduce verbosity for the model-facing definition while keeping everything fully transparent, inspectable, and explicit. The low-level `InputSchema` path remains available. See `TypedToolFunc` and the schema helpers in `agent/tool.go` for further ergonomics (pre-built tools next).
-
-## 4. When to use `Ask` vs `Loop`
-
-Use `Ask` when you want one model response:
+`Assistant` is the practical middle path. It bundles a client, prompt, toolset, context manager, and loop limit into one step.
 
 ~~~go
-reply, err := client.Ask(ctx, system, history)
+a := agent.Assistant{
+    Client:  client,
+    System:  "You are a helpful assistant.",
+    Tools:   toolset,
+    Context: agent.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+    MaxIter: 10,
+}
+
+result, err := a.Step(ctx, history)
+if err != nil {
+    log.Fatal(err)
+}
+
+history = result.Messages
 ~~~
 
-Use `Loop` when the model can call tools:
+It is just a thin helper over:
 
 ~~~go
-result, err := client.Loop(ctx, system, history, tools, dispatch, 5)
+trimmed, err := a.Context.Trim(ctx, history)
+result, err := client.Loop(ctx, a.System, trimmed, a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter)
 ~~~
 
-Use `AskStream` or `LoopStream` when you want streaming output.
+No persistence, runner, scheduler, or hidden lifecycle is introduced.
 
-See `README.md` for streaming examples.
+## Ask vs Loop vs Assistant
 
-## 5. Production notes
+Use the smallest shape that solves the problem:
 
-This guide keeps the first path short. In real services, you will usually also want:
+| Need | Use |
+|---|---|
+| One model response | `Ask` |
+| Streaming one response | `AskStream` |
+| Model can call tools | `Loop` |
+| Streaming tool loop | `LoopStream` |
+| Repeated assistant glue | `Assistant.Step` or `Assistant.StepStream` |
+| Independent fan-out work | `Parallel` |
+
+## Production notes
+
+In real services, you will usually add:
 
 - `context.WithTimeout`
 - retry configuration
@@ -281,24 +277,22 @@ This guide keeps the first path short. In real services, you will usually also w
 - conversation trimming
 - typed error handling with `errors.Is` and `errors.As`
 - tests with a custom mock `Provider`
+- explicit persistence for `[]agent.Message`
 
 The core shape stays the same:
 
 ~~~go
-history := []agent.Message{
-	agent.NewUserMessage("..."),
-}
-
+history := []agent.Message{agent.NewUserMessage("...")}
 result, err := client.Loop(ctx, system, history, tools, dispatch, maxIterations)
+history = result.Messages
 ~~~
-
-You can persist `history`, inspect it, trim it, replay it in tests, or build your own loop around `Ask`.
 
 ## Next steps
 
-- Read `README.md` for providers, streaming, retries, errors, testing, and configuration.
+- Read [`README.md`](README.md) for providers, streaming, retries, errors, testing, MCP, and package layout.
+- Read [`VISION.md`](VISION.md) to understand the design philosophy.
+- Check [`ROADMAP.md`](ROADMAP.md) for current priorities.
 - Run the examples in `examples/`.
 - Try adding one tool from your own application.
-- Keep the loop boring and explicit.
 
 That is the point of `gocode`: useful LLM workflows in Go without giving up control of your program.

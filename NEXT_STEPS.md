@@ -1,16 +1,17 @@
 # Next Steps
 
-The project strategy and near-term priorities have been consolidated into [`ROADMAP.md`](ROADMAP.md).
+Use these files as the project reference set:
 
-Use the roadmap as the source of truth for:
+- [`VISION.md`](VISION.md) — product philosophy and design principles.
+- [`README.md`](README.md) — current user-facing reference and package overview.
+- [`QUICKSTART.md`](QUICKSTART.md) — shortest path from install to a model call and tool loop.
+- [`ROADMAP.md`](ROADMAP.md) — active future work only.
 
-- the product vision
-- the "Lego blocks, not a framework" design principle
-- immediate priorities
-- tool ergonomics
-- pre-built tool plans
-- session and persistence direction
-- implementation order
-- non-goals
+Current focus:
 
-This file remains as a short pointer for anyone looking for the previous standalone planning note.
+1. add transparent skills
+2. resolve/document streaming retry behavior
+3. write small recipe docs
+4. build the repo explainer example
+
+Completed foundation work has been removed from the active roadmap and summarized as baseline in `ROADMAP.md`.
