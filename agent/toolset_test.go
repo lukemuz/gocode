@@ -3,7 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestToolsetToolsAndDispatch(t *testing.T) {
@@ -79,5 +83,214 @@ func TestEmptyToolset(t *testing.T) {
 	}
 	if d := ts.Dispatch(); len(d) != 0 {
 		t.Errorf("want 0 dispatch entries, got %d", len(d))
+	}
+}
+
+// ---- Middleware tests -------------------------------------------------------
+
+func makeTestBinding(name string, fn ToolFunc) ToolBinding {
+	schema, _ := json.Marshal(InputSchema{Type: "object", Properties: map[string]SchemaProperty{}})
+	return ToolBinding{
+		Tool: Tool{Name: name, Description: name, InputSchema: schema},
+		Func: fn,
+	}
+}
+
+func TestWrapPreservesOrder(t *testing.T) {
+	var calls []string
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("a", func(_ context.Context, _ json.RawMessage) (string, error) {
+			calls = append(calls, "a")
+			return "a", nil
+		}),
+		makeTestBinding("b", func(_ context.Context, _ json.RawMessage) (string, error) {
+			calls = append(calls, "b")
+			return "b", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap() // no-op wrap
+	dispatch := wrapped.Dispatch()
+	dispatch["a"](context.Background(), nil)
+	dispatch["b"](context.Background(), nil)
+
+	if len(calls) != 2 || calls[0] != "a" || calls[1] != "b" {
+		t.Errorf("unexpected call order: %v", calls)
+	}
+}
+
+func TestWithTimeout(t *testing.T) {
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("slow", func(ctx context.Context, _ json.RawMessage) (string, error) {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(10 * time.Second):
+				return "done", nil
+			}
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithTimeout(10 * time.Millisecond))
+	_, err := wrapped.Dispatch()["slow"](context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected DeadlineExceeded, got %v", err)
+	}
+}
+
+func TestWithResultLimit(t *testing.T) {
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("big", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return strings.Repeat("x", 1000), nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithResultLimit(100))
+	out, err := wrapped.Dispatch()["big"](context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 100 {
+		t.Errorf("expected 100 bytes, got %d", len(out))
+	}
+}
+
+func TestWithResultLimitPassesError(t *testing.T) {
+	want := errors.New("tool failed")
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("fail", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "", want
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithResultLimit(100))
+	_, err := wrapped.Dispatch()["fail"](context.Background(), nil)
+	if !errors.Is(err, want) {
+		t.Errorf("expected %v, got %v", want, err)
+	}
+}
+
+type testLogger struct{ entries []string }
+
+func (l *testLogger) Info(msg string, args ...any)  { l.entries = append(l.entries, "INFO:"+msg) }
+func (l *testLogger) Error(msg string, args ...any) { l.entries = append(l.entries, "ERROR:"+msg) }
+
+func TestWithLoggingSuccess(t *testing.T) {
+	logger := &testLogger{}
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("mytool", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "ok", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithLogging(logger))
+	wrapped.Dispatch()["mytool"](context.Background(), nil)
+
+	if len(logger.entries) != 2 {
+		t.Fatalf("expected 2 log entries, got %d: %v", len(logger.entries), logger.entries)
+	}
+}
+
+func TestWithLoggingError(t *testing.T) {
+	logger := &testLogger{}
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("bad", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "", errors.New("boom")
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithLogging(logger))
+	wrapped.Dispatch()["bad"](context.Background(), nil)
+
+	hasError := false
+	for _, e := range logger.entries {
+		if strings.HasPrefix(e, "ERROR:") {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Errorf("expected an ERROR log entry, got: %v", logger.entries)
+	}
+}
+
+func TestWithPanicRecovery(t *testing.T) {
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("panicky", func(_ context.Context, _ json.RawMessage) (string, error) {
+			panic("something went wrong")
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithPanicRecovery())
+	out, err := wrapped.Dispatch()["panicky"](context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error from panic recovery")
+	}
+	if !strings.Contains(err.Error(), "panicked") {
+		t.Errorf("expected 'panicked' in error message, got: %v", err)
+	}
+	if out != "" {
+		t.Errorf("expected empty output, got %q", out)
+	}
+}
+
+func TestWithLoggingSlogCompatible(t *testing.T) {
+	// Ensure *slog.Logger satisfies the Logger interface.
+	var _ Logger = slog.Default()
+}
+
+func TestWithResultLimitBelowMax(t *testing.T) {
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("small", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "hi", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithResultLimit(100))
+	out, err := wrapped.Dispatch()["small"](context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "hi" {
+		t.Errorf("expected %q, got %q", "hi", out)
+	}
+}
+
+func TestWrapMiddlewareOrder(t *testing.T) {
+	// Each middleware records when its pre- and post-execution hooks run.
+	// We verify that middleware is applied outermost-first: mw1 wraps mw2 wraps the tool.
+	var log []string
+
+	record := func(label string) Middleware {
+		return func(b ToolBinding) ToolFunc {
+			return func(ctx context.Context, input json.RawMessage) (string, error) {
+				log = append(log, label+":before")
+				out, err := b.Func(ctx, input)
+				log = append(log, label+":after")
+				return out, err
+			}
+		}
+	}
+
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("tool", func(_ context.Context, _ json.RawMessage) (string, error) {
+			log = append(log, "tool")
+			return "ok", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(record("mw1"), record("mw2"))
+	wrapped.Dispatch()["tool"](context.Background(), nil)
+
+	want := []string{"mw1:before", "mw2:before", "tool", "mw2:after", "mw1:after"}
+	if len(log) != len(want) {
+		t.Fatalf("expected %v, got %v", want, log)
+	}
+	for i, v := range want {
+		if log[i] != v {
+			t.Errorf("step %d: expected %q, got %q", i, v, log[i])
+		}
 	}
 }
