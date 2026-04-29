@@ -412,7 +412,21 @@ _, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) 
 
 Use `LoopStream` or `Assistant.StepStream` for streamed tool loops.
 
-Streaming callbacks fire synchronously as provider deltas arrive. Because retries can restart a stream after partial output, callbacks may see partial text from failed attempts. See the roadmap for the planned helper and recipe around this behavior.
+Streaming callbacks fire synchronously as provider deltas arrive. Because retries can restart a stream after partial output, callbacks may see partial text from failed attempts before the successful attempt begins.
+
+Use `StreamBuffer` with `RetryConfig.OnRetry` to react to each retry and clear partial output:
+
+~~~go
+sb := agent.NewStreamBuffer(
+    func(b agent.ContentBlock) { fmt.Print(b.Text) }, // forward tokens live
+    func() { fmt.Print("\n[retrying…]\n") },           // clear on retry
+)
+cfg := agent.RetryConfig{OnRetry: sb.OnRetry}
+client, _ := agent.New(agent.Config{..., Retry: cfg})
+msg, err := client.AskStream(ctx, system, history, sb.OnToken)
+~~~
+
+Both callbacks may be nil. `OnRetry` also receives the 1-based retry attempt number and the computed backoff duration, which you can use for logging.
 
 ## Errors and retries
 
@@ -427,6 +441,9 @@ client, err := agent.New(agent.Config{
         MaxRetries:  5,
         InitialWait: time.Second,
         MaxWait:     30 * time.Second,
+        OnRetry:     func(attempt int, wait time.Duration) {
+            log.Printf("retry %d, waiting %s", attempt, wait)
+        },
     },
 })
 ~~~
@@ -497,6 +514,7 @@ agent/
   toolset.go                ToolBinding, Toolset, middleware
   parallel.go               Parallel[T]
   retry.go                  RetryConfig and retry helpers
+  stream.go                 StreamBuffer for retry-aware streaming
   errors.go                 typed errors
   mcp/                      MCP adapter
   tools/clock/              current time tool
@@ -519,15 +537,15 @@ Completed foundation:
 - safe built-in clock/math/workspace tools
 - toolsets and middleware
 - explicit context management
-- basic assistant block
+- assistant block with hooks and streaming
 - MCP adapter
+- streaming retry helper (`StreamBuffer`, `RetryConfig.OnRetry`)
 
 Next focus:
 
-1. streaming retry helper and documentation
-2. recipe-style documentation
-3. repo explainer example app
-5. production helpers: sessions, durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
+1. recipe-style documentation
+2. repo explainer example app
+3. production helpers: sessions, durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
 
 See [`ROADMAP.md`](ROADMAP.md) for details.
 
