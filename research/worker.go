@@ -28,8 +28,6 @@ type findingsInput struct {
 	} `json:"citations"`
 }
 
-// submitFindingsSchema is built with the typed schema helpers. The shape is
-// {summary: string, citations: [{url, title, snippet}]}.
 var submitFindingsSchema = agent.Object(
 	agent.String("summary", "Concise factual answer to the sub-question, 3-8 sentences", agent.Required()),
 	agent.Array("citations", "URLs of sources used as evidence",
@@ -42,8 +40,8 @@ var submitFindingsSchema = agent.Object(
 )
 
 // Investigate runs a single worker against one subtask. searchTools is the
-// caller-supplied toolset (typically Brave MCP) plus an internally-added
-// submit_findings tool.
+// caller-supplied toolset (typically Brave MCP); Extract adds the terminal
+// submit_findings tool internally.
 func Investigate(
 	ctx context.Context,
 	client *agent.Client,
@@ -54,72 +52,33 @@ func Investigate(
 	if maxIter <= 0 {
 		maxIter = 12
 	}
-
-	var captured findingsInput
-	submitted := false
-
-	submitFn := agent.TypedToolFunc(func(ctx context.Context, in findingsInput) (string, error) {
-		if in.Summary == "" {
-			return "", fmt.Errorf("summary is required")
-		}
-		captured = in
-		submitted = true
-		return "findings accepted", nil
-	})
-
-	submitTool, err := agent.NewTool(
-		"submit_findings",
-		"Submit your final findings for this sub-question. Call this exactly once when done.",
-		submitFindingsSchema,
-	)
-	if err != nil {
-		return Note{SubtaskID: subtask.ID, Question: subtask.Question}, agent.Usage{},
-			fmt.Errorf("worker: build tool: %w", err)
-	}
-
-	submitSet := agent.Toolset{Bindings: []agent.ToolBinding{{
-		Tool: submitTool, Func: submitFn, Meta: agent.ToolMetadata{Source: "research/worker"},
-	}}}
-
-	tools, err := agent.Join(searchTools, submitSet)
-	if err != nil {
-		return Note{SubtaskID: subtask.ID, Question: subtask.Question}, agent.Usage{},
-			fmt.Errorf("worker: combine toolsets: %w", err)
-	}
-
 	prompt := fmt.Sprintf("Sub-question: %s\n\nResearch this and call submit_findings.", subtask.Question)
 
-	result, err := client.Loop(
-		ctx,
-		workerSystem,
+	raw, result, err := agent.Extract(ctx, client, workerSystem,
 		[]agent.Message{agent.NewUserMessage(prompt)},
-		tools,
-		maxIter,
-	)
+		agent.ExtractParams[findingsInput]{
+			Description: "Submit your final findings for this sub-question. Call this exactly once when done.",
+			Schema:      submitFindingsSchema,
+			Name:        "submit_findings",
+			Tools:       searchTools,
+			MaxIter:     maxIter,
+			Validate: func(in findingsInput) error {
+				if in.Summary == "" {
+					return fmt.Errorf("summary is required")
+				}
+				return nil
+			},
+		})
+
 	note := Note{SubtaskID: subtask.ID, Question: subtask.Question}
 	if err != nil {
 		note.Err = err.Error()
-		// Best-effort: if the worker submitted before erroring on a later turn,
-		// preserve what it captured.
-		if submitted {
-			note.Summary = captured.Summary
-			note.Citations = convertCitations(captured)
-		}
 		return note, result.Usage, err
 	}
-	if !submitted {
-		note.Err = "worker finished without calling submit_findings"
-		return note, result.Usage, fmt.Errorf("%s", note.Err)
+	note.Summary = raw.Summary
+	note.Citations = make([]Citation, len(raw.Citations))
+	for i, c := range raw.Citations {
+		note.Citations[i] = Citation{URL: c.URL, Title: c.Title, Snippet: c.Snippet}
 	}
-	note.Summary = captured.Summary
-	note.Citations = convertCitations(captured)
 	return note, result.Usage, nil
-}
-
-func convertCitations(in findingsInput) []Citation {
-	out := make([]Citation, len(in.Citations))
-	for i, c := range in.Citations {
-		out[i] = Citation{URL: c.URL, Title: c.Title, Snippet: c.Snippet}
-	}
-	return out
 }

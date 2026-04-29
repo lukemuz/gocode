@@ -26,8 +26,6 @@ type planInput struct {
 	} `json:"subtasks"`
 }
 
-// submitPlanSchema is built with the typed schema helpers. The shape is
-// {reasoning: string, subtasks: [{question, rationale}]}.
 var submitPlanSchema = agent.Object(
 	agent.String("reasoning", "Brief explanation of why these sub-questions cover the original."),
 	agent.Array("subtasks", "List of focused sub-questions to research",
@@ -38,60 +36,39 @@ var submitPlanSchema = agent.Object(
 		agent.Required()),
 )
 
-// Decompose splits question into subtasks using a single Loop with a
-// submit_plan tool. The returned Plan has stable IDs (s1, s2, ...).
+// Decompose splits question into subtasks. The returned Plan has stable IDs
+// (s1, s2, ...). The validator enforces the maxSubtasks cap as a retriable
+// tool error so the model can self-correct.
 func Decompose(ctx context.Context, client *agent.Client, question string, maxSubtasks int) (Plan, agent.Usage, error) {
 	if maxSubtasks <= 0 {
 		maxSubtasks = 6
 	}
-
-	var captured planInput
-	submitted := false
-
-	submitFn := agent.TypedToolFunc(func(ctx context.Context, in planInput) (string, error) {
-		if len(in.Subtasks) == 0 {
-			return "", fmt.Errorf("submit_plan requires at least one subtask")
-		}
-		if len(in.Subtasks) > maxSubtasks {
-			return "", fmt.Errorf("too many subtasks: got %d, max is %d", len(in.Subtasks), maxSubtasks)
-		}
-		captured = in
-		submitted = true
-		return "plan accepted", nil
-	})
-
-	submitTool, err := agent.NewTool(
-		"submit_plan",
-		"Submit the final research plan. Call this exactly once when you have decided on the sub-questions.",
-		submitPlanSchema,
-	)
-	if err != nil {
-		return Plan{}, agent.Usage{}, fmt.Errorf("planner: build tool: %w", err)
-	}
-
 	prompt := fmt.Sprintf("Original question: %s\n\nMaximum sub-questions allowed: %d\n\nDecompose, then call submit_plan.",
 		question, maxSubtasks)
 
-	tools := agent.Toolset{Bindings: []agent.ToolBinding{{
-		Tool: submitTool, Func: submitFn, Meta: agent.ToolMetadata{Source: "research/planner"},
-	}}}
-
-	result, err := client.Loop(
-		ctx,
-		plannerSystem,
+	raw, result, err := agent.Extract(ctx, client, plannerSystem,
 		[]agent.Message{agent.NewUserMessage(prompt)},
-		tools,
-		4,
-	)
+		agent.ExtractParams[planInput]{
+			Description: "Submit the final research plan. Call this exactly once when you have decided on the sub-questions.",
+			Schema:      submitPlanSchema,
+			Name:        "submit_plan",
+			MaxIter:     4,
+			Validate: func(in planInput) error {
+				if len(in.Subtasks) == 0 {
+					return fmt.Errorf("at least one subtask required")
+				}
+				if len(in.Subtasks) > maxSubtasks {
+					return fmt.Errorf("too many subtasks: got %d, max is %d", len(in.Subtasks), maxSubtasks)
+				}
+				return nil
+			},
+		})
 	if err != nil {
-		return Plan{}, result.Usage, fmt.Errorf("planner: loop: %w", err)
-	}
-	if !submitted {
-		return Plan{}, result.Usage, fmt.Errorf("planner: model finished without calling submit_plan")
+		return Plan{}, result.Usage, fmt.Errorf("planner: %w", err)
 	}
 
-	subs := make([]Subtask, len(captured.Subtasks))
-	for i, s := range captured.Subtasks {
+	subs := make([]Subtask, len(raw.Subtasks))
+	for i, s := range raw.Subtasks {
 		subs[i] = Subtask{
 			ID:        fmt.Sprintf("s%d", i+1),
 			Question:  s.Question,
@@ -101,6 +78,6 @@ func Decompose(ctx context.Context, client *agent.Client, question string, maxSu
 	return Plan{
 		Question:  question,
 		Subtasks:  subs,
-		Reasoning: captured.Reasoning,
+		Reasoning: raw.Reasoning,
 	}, result.Usage, nil
 }
