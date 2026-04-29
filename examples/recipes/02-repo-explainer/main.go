@@ -107,7 +107,7 @@ func main() {
 		KeepRecent: 12, // recent turns and their tool cycles
 		Summarizer: func(sctx context.Context, trimmed []agent.Message) (string, error) {
 			rendered := agent.RenderForSummary(trimmed, 0)
-			reply, err := cheap.Ask(sctx,
+			reply, _, err := cheap.Ask(sctx,
 				"You compress earlier portions of an investigation transcript. "+
 					"Preserve every concrete fact: file paths, line numbers, function "+
 					"names, tool outputs the assistant relied on, and conclusions reached.",

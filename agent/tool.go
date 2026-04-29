@@ -91,13 +91,20 @@ func JSONResult(v any) (string, error) {
 }
 
 // SchemaProperty describes one parameter within an InputSchema.
-// The schema builder helpers (below) populate these fields; Enum
-// supports constrained values and is included for common tool use
-// cases while keeping the core minimal.
+// The schema builder helpers (below) populate these fields; Enum supports
+// constrained values; Items, Properties, and Required let arrays and nested
+// objects round-trip without dropping to hand-written JSON.
+//
+// For schemas richer than these fields express (oneOf, $ref, patternProperties,
+// etc.) construct a Tool directly with a json.RawMessage InputSchema — see the
+// "Hand-rolled schemas" section in RECIPES.md.
 type SchemaProperty struct {
-	Type        string  `json:"type"`
-	Description string  `json:"description,omitempty"`
-	Enum        []any   `json:"enum,omitempty"`
+	Type        string                    `json:"type"`
+	Description string                    `json:"description,omitempty"`
+	Enum        []any                     `json:"enum,omitempty"`
+	Items       *SchemaProperty           `json:"items,omitempty"`      // for type:"array"
+	Properties  map[string]SchemaProperty `json:"properties,omitempty"` // for type:"object"
+	Required    []string                  `json:"required,omitempty"`   // for type:"object"
 }
 
 // InputSchema is the JSON Schema object describing a tool's input parameters.
@@ -197,14 +204,7 @@ func Boolean(name, description string, opts ...Option) Property {
 // point for ergonomic tool schemas. The result is identical to a manual
 // InputSchema literal and works with NewTool/NewTypedTool.
 func Object(fields ...Property) InputSchema {
-	props := make(map[string]SchemaProperty, len(fields))
-	var required []string
-	for _, f := range fields {
-		props[f.Name] = f.SchemaProperty
-		if f.Required {
-			required = append(required, f.Name)
-		}
-	}
+	props, required := buildFields(fields)
 	s := InputSchema{
 		Type:       "object",
 		Properties: props,
@@ -213,6 +213,70 @@ func Object(fields ...Property) InputSchema {
 		s.Required = required
 	}
 	return s
+}
+
+// ObjectOf builds a nested-object SchemaProperty, suitable for passing as the
+// item type to Array or as a child of a parent ObjectOf. Use Object at the
+// top level (it returns InputSchema, the type tools require); use ObjectOf
+// anywhere a SchemaProperty is expected.
+//
+// Example:
+//
+//	Array("subtasks", "List of sub-questions",
+//	    ObjectOf(
+//	        String("question", "Sub-question to research", Required()),
+//	        String("rationale", "Why this matters"),
+//	    ),
+//	    Required())
+func ObjectOf(fields ...Property) SchemaProperty {
+	props, required := buildFields(fields)
+	return SchemaProperty{
+		Type:       "object",
+		Properties: props,
+		Required:   required,
+	}
+}
+
+// Array returns a Property with type "array". items describes the element
+// schema; use a primitive SchemaProperty (e.g. {Type: "string"}) for arrays
+// of scalars or ObjectOf(...) for arrays of objects.
+//
+// Example:
+//
+//	Array("tags", "Free-form tags", SchemaProperty{Type: "string"})
+//	Array("steps", "Pipeline steps", ObjectOf(
+//	    String("name", "Step name", Required()),
+//	    Integer("retries", "Retry count"),
+//	), Required())
+func Array(name, description string, items SchemaProperty, opts ...Option) Property {
+	itemsCopy := items
+	p := Property{
+		Name: name,
+		SchemaProperty: SchemaProperty{
+			Type:        "array",
+			Description: description,
+			Items:       &itemsCopy,
+		},
+	}
+	for _, opt := range opts {
+		opt(&p)
+	}
+	return p
+}
+
+// buildFields turns a slice of Property values into the (properties, required)
+// pair shared by Object and ObjectOf. Required is nil-safe: an empty slice is
+// returned, which marshals away under the omitempty tag.
+func buildFields(fields []Property) (map[string]SchemaProperty, []string) {
+	props := make(map[string]SchemaProperty, len(fields))
+	var required []string
+	for _, f := range fields {
+		props[f.Name] = f.SchemaProperty
+		if f.Required {
+			required = append(required, f.Name)
+		}
+	}
+	return props, required
 }
 
 // Tool defines a capability available to the agent during a Loop.

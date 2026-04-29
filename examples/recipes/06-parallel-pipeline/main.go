@@ -48,7 +48,7 @@ func main() {
 }
 
 func ask(ctx context.Context, client *agent.Client, prompt string) (string, error) {
-	reply, err := client.Ask(ctx, "", []agent.Message{agent.NewUserMessage(prompt)})
+	reply, _, err := client.Ask(ctx, "", []agent.Message{agent.NewUserMessage(prompt)})
 	if err != nil {
 		return "", err
 	}

@@ -36,12 +36,13 @@ func main() {
         agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
     }
 
-    reply, err := client.Ask(ctx, "You are concise.", history)
+    reply, usage, err := client.Ask(ctx, "You are concise.", history)
     if err != nil {
         log.Fatal(err)
     }
 
     fmt.Println(agent.TextContent(reply))
+    fmt.Printf("(%d in / %d out tokens)\n", usage.InputTokens, usage.OutputTokens)
 }
 ~~~
 
@@ -54,7 +55,7 @@ func main() {
 ~~~go
 history = append(history, reply)
 history = append(history, agent.NewUserMessage("Pick the most practical idea."))
-reply, err = client.Ask(ctx, "You are concise.", history)
+reply, _, err = client.Ask(ctx, "You are concise.", history)
 ~~~
 
 That is the core data model: `[]agent.Message` in, `agent.Message` out.
@@ -116,6 +117,46 @@ tools := agent.Toolset{Bindings: []agent.ToolBinding{{Tool: calc, Func: calcFn}}
 ~~~
 
 The model sees the schema; your handler receives a typed Go value; dispatch is a normal map. No reflection registry, no hidden runtime.
+
+### Arrays and nested objects
+
+Use `agent.Array` for list parameters and `agent.ObjectOf` for nested object shapes:
+
+~~~go
+schema := agent.Object(
+    agent.String("reasoning", "Why these subtasks cover the question"),
+    agent.Array("subtasks", "List of sub-questions",
+        agent.ObjectOf(
+            agent.String("question", "Sub-question to research", agent.Required()),
+            agent.String("rationale", "Why this matters"),
+        ),
+        agent.Required()),
+)
+~~~
+
+`Array` takes a `SchemaProperty` for its element type — pass `ObjectOf(...)` for arrays of objects, or a primitive like `SchemaProperty{Type: "string"}` for arrays of scalars.
+
+### Hand-rolled schemas (escape hatch)
+
+The builders cover ~95% of tool schemas. For the rest — `oneOf`, `$ref`, regex `pattern`, recursive types — `agent.Tool.InputSchema` is `json.RawMessage`, so any valid JSON Schema works:
+
+~~~go
+const mySchema = `{
+  "type": "object",
+  "properties": {
+    "value": {"oneOf": [{"type": "string"}, {"type": "number"}]}
+  },
+  "required": ["value"]
+}`
+
+tool := agent.Tool{
+    Name:        "store",
+    Description: "Store a string or number",
+    InputSchema: json.RawMessage(mySchema),
+}
+~~~
+
+You can mix this with `agent.TypedToolFunc` for the dispatch side; only the schema needs to be hand-rolled.
 
 ## 5. Compose built-ins and middleware
 

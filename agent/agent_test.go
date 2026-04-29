@@ -209,6 +209,72 @@ func TestNewTool(t *testing.T) {
 	}
 }
 
+func TestSchema_ArrayOfObjects(t *testing.T) {
+	// This is the planner-style schema shape that previously forced callers
+	// out of the typed builders into hand-written JSON.
+	schema := Object(
+		String("reasoning", "Why these subtasks cover the question"),
+		Array("subtasks", "List of sub-questions",
+			ObjectOf(
+				String("question", "Sub-question to research", Required()),
+				String("rationale", "Why this matters"),
+			),
+			Required()),
+	)
+
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("round-trip: %v", err)
+	}
+
+	props := got["properties"].(map[string]any)
+	subtasks, ok := props["subtasks"].(map[string]any)
+	if !ok {
+		t.Fatalf("subtasks property missing: %v", got)
+	}
+	if subtasks["type"] != "array" {
+		t.Errorf("subtasks type = %v, want array", subtasks["type"])
+	}
+	items, ok := subtasks["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("items missing: %v", subtasks)
+	}
+	if items["type"] != "object" {
+		t.Errorf("items type = %v, want object", items["type"])
+	}
+	itemProps := items["properties"].(map[string]any)
+	if _, ok := itemProps["question"]; !ok {
+		t.Errorf("items.properties.question missing")
+	}
+	itemReq := items["required"].([]any)
+	if len(itemReq) != 1 || itemReq[0] != "question" {
+		t.Errorf("items.required = %v, want [question]", itemReq)
+	}
+	topReq := got["required"].([]any)
+	if len(topReq) != 1 || topReq[0] != "subtasks" {
+		t.Errorf("top required = %v, want [subtasks]", topReq)
+	}
+}
+
+func TestSchema_ArrayOfScalars(t *testing.T) {
+	schema := Object(
+		Array("tags", "Free-form tags", SchemaProperty{Type: "string"}),
+	)
+	raw, _ := json.Marshal(schema)
+	var got map[string]any
+	_ = json.Unmarshal(raw, &got)
+	tags := got["properties"].(map[string]any)["tags"].(map[string]any)
+	items := tags["items"].(map[string]any)
+	if items["type"] != "string" {
+		t.Errorf("items type = %v, want string", items["type"])
+	}
+}
+
 func TestTypedToolFunc(t *testing.T) {
 	type input struct {
 		Op string `json:"op"`
@@ -627,12 +693,17 @@ func TestClientAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 	history := []Message{NewUserMessage("hello")}
-	msg, err := c.Ask(context.Background(), "be helpful", history)
+	msg, usage, err := c.Ask(context.Background(), "be helpful", history)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if msg.Role != RoleAssistant || TextContent(msg) != "Hello from mock" {
 		t.Errorf("unexpected message: role=%s content=%s", msg.Role, TextContent(msg))
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		// testProvider populates non-zero usage; if both are zero, the
+		// passthrough is broken.
+		t.Errorf("expected non-zero usage from provider, got %+v", usage)
 	}
 }
 
@@ -648,7 +719,7 @@ func TestClientAskStream(t *testing.T) {
 		received = append(received, b)
 	}
 	history := []Message{NewUserMessage("hello")}
-	msg, err := c.AskStream(context.Background(), "", history, onToken)
+	msg, _, err := c.AskStream(context.Background(), "", history, onToken)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -959,7 +1030,7 @@ func TestAskStreamNilCallback(t *testing.T) {
 	p.Deltas = []ContentBlock{{Type: TypeText, Text: "hello"}}
 	c, _ := New(Config{Provider: p, Model: "test-model"})
 	// nil onToken must not panic
-	msg, err := c.AskStream(context.Background(), "", []Message{NewUserMessage("hi")}, nil)
+	msg, _, err := c.AskStream(context.Background(), "", []Message{NewUserMessage("hi")}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
