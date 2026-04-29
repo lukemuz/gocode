@@ -35,6 +35,8 @@ Use `gocode` when you want:
 
 The project is not anti-convenience. It is anti-trap: helpers should compress boilerplate without hiding model calls, tool execution, memory mutation, persistence, or application lifecycle.
 
+Complex workflows are built with Go control flow, not hidden orchestration. Run loops in goroutines, compose outputs with normal function calls, and keep the data visible at every step.
+
 For the longer philosophy, see [`VISION.md`](VISION.md). For future work, see [`ROADMAP.md`](ROADMAP.md).
 
 ## Install
@@ -200,6 +202,82 @@ history = result.Messages
 `Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit is reached.
 
 Multiple tool calls requested in the same model turn run concurrently and are returned to the model in the original order.
+
+### Composing loops
+
+Because `Ask`, `Loop`, and `Assistant.Step` are ordinary Go calls over plain data, they compose like any other functions. For example, you can run two independent tool-using loops at the same time, then feed their outputs into a later synthesis call.
+
+~~~go
+type SubagentOutput struct {
+    Name string
+    Text string
+}
+
+results := agent.Parallel(ctx,
+    func(ctx context.Context) (SubagentOutput, error) {
+        result, err := client.Loop(
+            ctx,
+            "You are a research assistant. Use your tools to gather facts.",
+            []agent.Message{agent.NewUserMessage(task)},
+            researchTools.Tools(),
+            researchTools.Dispatch(),
+            8,
+        )
+        if err != nil {
+            return SubagentOutput{}, err
+        }
+
+        last := result.Messages[len(result.Messages)-1]
+        return SubagentOutput{Name: "research", Text: agent.TextContent(last)}, nil
+    },
+    func(ctx context.Context) (SubagentOutput, error) {
+        result, err := client.Loop(
+            ctx,
+            "You are an implementation assistant. Use your tools to inspect code.",
+            []agent.Message{agent.NewUserMessage(task)},
+            codeTools.Tools(),
+            codeTools.Dispatch(),
+            8,
+        )
+        if err != nil {
+            return SubagentOutput{}, err
+        }
+
+        last := result.Messages[len(result.Messages)-1]
+        return SubagentOutput{Name: "implementation", Text: agent.TextContent(last)}, nil
+    },
+)
+
+for _, r := range results {
+    if r.Err != nil {
+        log.Fatal(r.Err)
+    }
+}
+
+synthesisHistory := []agent.Message{
+    agent.NewUserMessage(fmt.Sprintf(`Original task:
+
+%s
+
+Research output:
+
+%s
+
+Implementation output:
+
+%s
+
+Synthesize these into one final answer.`,
+        task,
+        results[0].Value.Text,
+        results[1].Value.Text,
+    )),
+}
+
+final, err := client.Ask(ctx, "You synthesize multiple agent outputs.", synthesisHistory)
+~~~
+
+The parallel branches can use different prompts, histories, tools, models, or clients. The synthesis step can be a simple `Ask`, as shown here, or another `Loop` if the synthesizer also needs tools.
 
 ## Practical assembly
 
