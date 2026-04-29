@@ -2,7 +2,6 @@ package research
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/lukemuz/gocode/agent"
@@ -29,28 +28,18 @@ type findingsInput struct {
 	} `json:"citations"`
 }
 
-const submitFindingsSchema = `{
-  "type": "object",
-  "properties": {
-    "summary": {
-      "type": "string",
-      "description": "Concise factual answer to the sub-question, 3-8 sentences."
-    },
-    "citations": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "url": {"type": "string"},
-          "title": {"type": "string"},
-          "snippet": {"type": "string"}
-        },
-        "required": ["url"]
-      }
-    }
-  },
-  "required": ["summary", "citations"]
-}`
+// submitFindingsSchema is built with the typed schema helpers. The shape is
+// {summary: string, citations: [{url, title, snippet}]}.
+var submitFindingsSchema = agent.Object(
+	agent.String("summary", "Concise factual answer to the sub-question, 3-8 sentences", agent.Required()),
+	agent.Array("citations", "URLs of sources used as evidence",
+		agent.ObjectOf(
+			agent.String("url", "Source URL", agent.Required()),
+			agent.String("title", "Page title"),
+			agent.String("snippet", "Quoted snippet that supports the summary"),
+		),
+		agent.Required()),
+)
 
 // Investigate runs a single worker against one subtask. searchTools is the
 // caller-supplied toolset (typically Brave MCP) plus an internally-added
@@ -78,10 +67,14 @@ func Investigate(
 		return "findings accepted", nil
 	})
 
-	submitTool := agent.Tool{
-		Name:        "submit_findings",
-		Description: "Submit your final findings for this sub-question. Call this exactly once when done.",
-		InputSchema: json.RawMessage(submitFindingsSchema),
+	submitTool, err := agent.NewTool(
+		"submit_findings",
+		"Submit your final findings for this sub-question. Call this exactly once when done.",
+		submitFindingsSchema,
+	)
+	if err != nil {
+		return Note{SubtaskID: subtask.ID, Question: subtask.Question}, agent.Usage{},
+			fmt.Errorf("worker: build tool: %w", err)
 	}
 
 	submitSet := agent.Toolset{Bindings: []agent.ToolBinding{{

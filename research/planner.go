@@ -2,7 +2,6 @@ package research
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/lukemuz/gocode/agent"
@@ -27,31 +26,17 @@ type planInput struct {
 	} `json:"subtasks"`
 }
 
-// submitPlanSchema is the JSON Schema for the submit_plan tool. We hand-write
-// it because gocode's InputSchema helpers don't model arrays-of-objects, and
-// Tool.InputSchema is json.RawMessage so any valid JSON Schema works.
-const submitPlanSchema = `{
-  "type": "object",
-  "properties": {
-    "reasoning": {
-      "type": "string",
-      "description": "Brief explanation of why these sub-questions cover the original."
-    },
-    "subtasks": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "properties": {
-          "question": {"type": "string", "description": "Self-contained sub-question to research."},
-          "rationale": {"type": "string", "description": "Why this sub-question matters."}
-        },
-        "required": ["question"]
-      }
-    }
-  },
-  "required": ["subtasks"]
-}`
+// submitPlanSchema is built with the typed schema helpers. The shape is
+// {reasoning: string, subtasks: [{question, rationale}]}.
+var submitPlanSchema = agent.Object(
+	agent.String("reasoning", "Brief explanation of why these sub-questions cover the original."),
+	agent.Array("subtasks", "List of focused sub-questions to research",
+		agent.ObjectOf(
+			agent.String("question", "Self-contained sub-question to research", agent.Required()),
+			agent.String("rationale", "Why this sub-question matters"),
+		),
+		agent.Required()),
+)
 
 // Decompose splits question into subtasks using a single Loop with a
 // submit_plan tool. The returned Plan has stable IDs (s1, s2, ...).
@@ -75,10 +60,13 @@ func Decompose(ctx context.Context, client *agent.Client, question string, maxSu
 		return "plan accepted", nil
 	})
 
-	submitTool := agent.Tool{
-		Name:        "submit_plan",
-		Description: "Submit the final research plan. Call this exactly once when you have decided on the sub-questions.",
-		InputSchema: json.RawMessage(submitPlanSchema),
+	submitTool, err := agent.NewTool(
+		"submit_plan",
+		"Submit the final research plan. Call this exactly once when you have decided on the sub-questions.",
+		submitPlanSchema,
+	)
+	if err != nil {
+		return Plan{}, agent.Usage{}, fmt.Errorf("planner: build tool: %w", err)
 	}
 
 	prompt := fmt.Sprintf("Original question: %s\n\nMaximum sub-questions allowed: %d\n\nDecompose, then call submit_plan.",

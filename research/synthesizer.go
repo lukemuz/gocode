@@ -26,15 +26,12 @@ func Synthesize(
 	notes []Note,
 ) (string, agent.Usage, error) {
 	prompt := buildSynthesisPrompt(question, notes)
-	// Use Loop with an empty toolset so we get aggregate Usage back. Ask would
-	// be one line shorter but discards usage.
-	result, err := client.Loop(ctx, synthesizerSystem,
-		[]agent.Message{agent.NewUserMessage(prompt)},
-		agent.Toolset{}, 1)
+	reply, usage, err := client.Ask(ctx, synthesizerSystem,
+		[]agent.Message{agent.NewUserMessage(prompt)})
 	if err != nil {
-		return "", result.Usage, fmt.Errorf("synthesizer: %w", err)
+		return "", usage, fmt.Errorf("synthesizer: %w", err)
 	}
-	return result.FinalText(), result.Usage, nil
+	return agent.TextContent(reply), usage, nil
 }
 
 func buildSynthesisPrompt(question string, notes []Note) string {
