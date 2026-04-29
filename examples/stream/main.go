@@ -36,7 +36,7 @@ func main() {
 	// AskStream delivers deltas via callback. The final Message is still returned
 	// (though we ignore it here for the live demo). Use LoopStream + onToolResult
 	// callback when you have tools.
-	_, err = client.AskStream(ctx, "You are a masterful short-story writer.", history, func(delta agent.ContentBlock) {
+	_, _, err = client.AskStream(ctx, "You are a masterful short-story writer.", history, func(delta agent.ContentBlock) {
 		if delta.Type == agent.TypeText && delta.Text != "" {
 			fmt.Print(delta.Text)
 		}

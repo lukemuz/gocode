@@ -19,10 +19,11 @@ func main() {
 		agent.NewUserMessage("What is the capital of France?"),
 	}
 
-	reply, err := client.Ask(context.Background(), "", history)
+	reply, usage, err := client.Ask(context.Background(), "", history)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Println(agent.TextContent(reply))
+	fmt.Printf("\n(tokens: %d in / %d out)\n", usage.InputTokens, usage.OutputTokens)
 }

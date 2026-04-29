@@ -72,12 +72,18 @@ func (c *Client) WithRecorder(rec Recorder) *Client {
 	return &Client{cfg: cfg}
 }
 
-// Ask makes a single LLM call and returns the model's reply as a Message.
+// Ask makes a single LLM call and returns the model's reply along with token
+// usage for the call.
 //
 // system sets the system prompt; pass "" to omit it.
 // history is the conversation so far and is not modified by Ask.
 // Append the returned Message to your history slice to continue the conversation.
-func (c *Client) Ask(ctx context.Context, system string, history []Message) (Message, error) {
+//
+// Token usage is reported separately so callers can aggregate cost across
+// multiple Ask calls without paying for a Loop. Pre-1.0 note: Ask previously
+// returned (Message, error); the Usage return was added so cost-conscious
+// callers don't have to fall back to Loop with an empty toolset.
+func (c *Client) Ask(ctx context.Context, system string, history []Message) (Message, Usage, error) {
 	req := ProviderRequest{
 		Model:     c.cfg.Model,
 		MaxTokens: c.cfg.MaxTokens,
@@ -88,9 +94,9 @@ func (c *Client) Ask(ctx context.Context, system string, history []Message) (Mes
 		return c.cfg.Provider.Call(ctx, req)
 	})
 	if err != nil {
-		return Message{}, err
+		return Message{}, Usage{}, err
 	}
-	return Message{Role: RoleAssistant, Content: resp.Content}, nil
+	return Message{Role: RoleAssistant, Content: resp.Content}, resp.Usage, nil
 }
 
 // AskStream is the streaming variant of Ask. It invokes the onToken
@@ -105,7 +111,10 @@ func (c *Client) Ask(ctx context.Context, system string, history []Message) (Mes
 // partial output before the next attempt starts.
 //
 // onToken may be nil, in which case token deltas are discarded.
-func (c *Client) AskStream(ctx context.Context, system string, history []Message, onToken func(ContentBlock)) (Message, error) {
+//
+// Pre-1.0 note: AskStream previously returned (Message, error); Usage was
+// added so streaming callers don't have to drop down to Loop for cost tracking.
+func (c *Client) AskStream(ctx context.Context, system string, history []Message, onToken func(ContentBlock)) (Message, Usage, error) {
 	if onToken == nil {
 		onToken = func(ContentBlock) {}
 	}
@@ -119,9 +128,9 @@ func (c *Client) AskStream(ctx context.Context, system string, history []Message
 		return c.cfg.Provider.Stream(ctx, req, onToken)
 	})
 	if err != nil {
-		return Message{}, err
+		return Message{}, Usage{}, err
 	}
-	return Message{Role: RoleAssistant, Content: resp.Content}, nil
+	return Message{Role: RoleAssistant, Content: resp.Content}, resp.Usage, nil
 }
 
 // LoopResult is returned by Loop and carries the complete updated history
