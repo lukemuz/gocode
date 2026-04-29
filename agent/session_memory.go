@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) Create(_ context.Context, s *Session) error {
 	if s.ID == "" {
-		return &sessionExistsError{id: s.ID}
+		return fmt.Errorf("agent: MemoryStore: session ID must not be empty")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -47,7 +48,7 @@ func (m *MemoryStore) Get(_ context.Context, id string) (*Session, error) {
 
 func (m *MemoryStore) Update(_ context.Context, s *Session) error {
 	if s.ID == "" {
-		return &sessionNotFoundError{id: s.ID}
+		return fmt.Errorf("agent: MemoryStore: session ID must not be empty")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,6 +73,27 @@ func (m *MemoryStore) List(_ context.Context, prefix string, limit int) ([]*Sess
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	ids := m.matchingIDs(prefix, limit)
+	out := make([]*Session, len(ids))
+	for i, id := range ids {
+		out[i] = cloneSession(m.sessions[id])
+	}
+	return out, nil
+}
+
+// ListIDs returns the IDs of sessions whose IDs have the given prefix, up to
+// limit entries sorted alphabetically. An empty prefix matches all IDs; a
+// limit of 0 means no limit. It is more efficient than List when only IDs are
+// needed, since it does not clone session data.
+func (m *MemoryStore) ListIDs(_ context.Context, prefix string, limit int) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.matchingIDs(prefix, limit), nil
+}
+
+// matchingIDs collects, sorts, and trims IDs matching prefix. Must be called
+// with at least a read lock held.
+func (m *MemoryStore) matchingIDs(prefix string, limit int) []string {
 	ids := make([]string, 0, len(m.sessions))
 	for id := range m.sessions {
 		if strings.HasPrefix(id, prefix) {
@@ -79,14 +101,8 @@ func (m *MemoryStore) List(_ context.Context, prefix string, limit int) ([]*Sess
 		}
 	}
 	sort.Strings(ids)
-
 	if limit > 0 && len(ids) > limit {
 		ids = ids[:limit]
 	}
-
-	out := make([]*Session, len(ids))
-	for i, id := range ids {
-		out[i] = cloneSession(m.sessions[id])
-	}
-	return out, nil
+	return ids
 }

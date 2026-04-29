@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"sync"
 )
 
 // FileStore is a Store implementation that persists each Session as a JSON
@@ -26,6 +26,7 @@ import (
 // common ID schemes while preventing path traversal.
 type FileStore struct {
 	dir string
+	mu  sync.RWMutex
 }
 
 // NewFileStore returns a FileStore rooted at dir, creating the directory if it
@@ -45,6 +46,8 @@ func (f *FileStore) Create(_ context.Context, s *Session) error {
 	if err != nil {
 		return fmt.Errorf("agent: FileStore: marshal session: %w", err)
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	path := f.path(s.ID)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -66,6 +69,104 @@ func (f *FileStore) Get(_ context.Context, id string) (*Session, error) {
 	if err := validateFileSessionID(id); err != nil {
 		return nil, err
 	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.readSession(id)
+}
+
+func (f *FileStore) Update(_ context.Context, s *Session) error {
+	if err := validateFileSessionID(s.ID); err != nil {
+		return err
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return fmt.Errorf("agent: FileStore: marshal session: %w", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Existence check and write are both under the write lock, eliminating
+	// the TOCTOU race that would exist if they were separate operations.
+	if _, err := os.Stat(f.path(s.ID)); err != nil {
+		if os.IsNotExist(err) {
+			return &sessionNotFoundError{id: s.ID}
+		}
+		return fmt.Errorf("agent: FileStore: stat session: %w", err)
+	}
+	return atomicWrite(f.path(s.ID), data)
+}
+
+func (f *FileStore) Delete(_ context.Context, id string) error {
+	if err := validateFileSessionID(id); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := os.Remove(f.path(id)); err != nil {
+		if os.IsNotExist(err) {
+			return &sessionNotFoundError{id: id}
+		}
+		return fmt.Errorf("agent: FileStore: delete session: %w", err)
+	}
+	return nil
+}
+
+func (f *FileStore) List(_ context.Context, prefix string, limit int) ([]*Session, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	ids, err := f.matchingIDs(prefix, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]*Session, 0, len(ids))
+	for _, id := range ids {
+		s, err := f.readSession(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// ListIDs returns the IDs of sessions whose IDs have the given prefix, up to
+// limit entries sorted alphabetically. An empty prefix matches all IDs; a
+// limit of 0 means no limit. It is more efficient than List when only IDs are
+// needed, since it reads only directory entries without loading file contents.
+func (f *FileStore) ListIDs(_ context.Context, prefix string, limit int) ([]string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.matchingIDs(prefix, limit)
+}
+
+// matchingIDs scans the directory and returns IDs with the given prefix,
+// sorted and capped at limit. Must be called with at least a read lock held.
+func (f *FileStore) matchingIDs(prefix string, limit int) ([]string, error) {
+	entries, err := os.ReadDir(f.dir)
+	if err != nil {
+		return nil, fmt.Errorf("agent: FileStore: read directory: %w", err)
+	}
+	// ReadDir returns entries sorted by filename, so no explicit sort needed.
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		if strings.HasPrefix(id, prefix) {
+			ids = append(ids, id)
+		}
+		if limit > 0 && len(ids) == limit {
+			break
+		}
+	}
+	return ids, nil
+}
+
+// readSession loads and decodes the session file for id. Must be called with
+// at least a read lock held.
+func (f *FileStore) readSession(id string) (*Session, error) {
 	data, err := os.ReadFile(f.path(id))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -78,75 +179,6 @@ func (f *FileStore) Get(_ context.Context, id string) (*Session, error) {
 		return nil, fmt.Errorf("agent: FileStore: unmarshal session %s: %w", id, err)
 	}
 	return &s, nil
-}
-
-func (f *FileStore) Update(_ context.Context, s *Session) error {
-	if err := validateFileSessionID(s.ID); err != nil {
-		return err
-	}
-	path := f.path(s.ID)
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return &sessionNotFoundError{id: s.ID}
-		}
-		return fmt.Errorf("agent: FileStore: stat session: %w", err)
-	}
-	data, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("agent: FileStore: marshal session: %w", err)
-	}
-	return atomicWrite(path, data)
-}
-
-func (f *FileStore) Delete(_ context.Context, id string) error {
-	if err := validateFileSessionID(id); err != nil {
-		return err
-	}
-	err := os.Remove(f.path(id))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &sessionNotFoundError{id: id}
-		}
-		return fmt.Errorf("agent: FileStore: delete session: %w", err)
-	}
-	return nil
-}
-
-func (f *FileStore) List(_ context.Context, prefix string, limit int) ([]*Session, error) {
-	entries, err := os.ReadDir(f.dir)
-	if err != nil {
-		return nil, fmt.Errorf("agent: FileStore: read directory: %w", err)
-	}
-
-	var ids []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		id := strings.TrimSuffix(e.Name(), ".json")
-		if strings.HasPrefix(id, prefix) {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-
-	if limit > 0 && len(ids) > limit {
-		ids = ids[:limit]
-	}
-
-	out := make([]*Session, 0, len(ids))
-	for _, id := range ids {
-		data, err := os.ReadFile(f.path(id))
-		if err != nil {
-			return nil, fmt.Errorf("agent: FileStore: read session %s: %w", id, err)
-		}
-		var s Session
-		if err := json.Unmarshal(data, &s); err != nil {
-			return nil, fmt.Errorf("agent: FileStore: unmarshal session %s: %w", id, err)
-		}
-		out = append(out, &s)
-	}
-	return out, nil
 }
 
 func (f *FileStore) path(id string) string {
