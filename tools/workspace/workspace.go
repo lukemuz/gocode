@@ -107,7 +107,7 @@ func NewReadOnly(cfg Config) (*Workspace, error) {
 	return w, nil
 }
 
-// Toolset returns all workspace bindings as an gocode.Toolset.
+// Toolset returns all workspace bindings as a gocode.Toolset.
 func (w *Workspace) Toolset() gocode.Toolset {
 	return gocode.Toolset{Bindings: w.bindings}
 }

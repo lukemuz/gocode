@@ -45,7 +45,7 @@ document you can `cat`, `jq`, diff, or hand-edit.
 - `gocode.Recorder` interface + `gocode.RecorderToSession`
 - `gocode.Event` and the `EventType` constants
 - `gocode.Agent` driving the turn
-- Built-in tools: `agent/tools/math`
+- Built-in tools: `tools/math`
 
 ## ADK comparison
 

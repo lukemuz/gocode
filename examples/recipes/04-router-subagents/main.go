@@ -159,7 +159,7 @@ func subagentTool(
 }
 
 // summarizeOnError extracts whatever text the subagent managed to produce
-// before failing. This is best-effort context for the parent gocode.
+// before failing. This is best-effort context for the parent agent.
 func summarizeOnError(result gocode.LoopResult) string {
 	for i := len(result.Messages) - 1; i >= 0; i-- {
 		if t := gocode.TextContent(result.Messages[i]); t != "" {

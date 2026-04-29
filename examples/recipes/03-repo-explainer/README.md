@@ -1,11 +1,11 @@
-# Recipe 02: repo-explainer
+# Recipe 03: repo-explainer
 
 A practical tool that answers questions about a code repository. The first
 recipe likely to be useful as a tool in its own right.
 
 ## What this shows
 
-Builds on recipe 01 by adding the three things 01 deliberately omitted:
+Builds on recipe 02 by adding the three things 02 deliberately omitted:
 
 - **Persistent sessions** via `gocode.FileStore` — repeated invocations with
   the same `-session` ID continue the conversation across runs
@@ -48,4 +48,4 @@ Sessions are stored under `~/.repo-explainer/<id>.json`.
 - `gocode.NewStreamBuffer` paired with `RetryConfig.OnRetry`
 - `gocode.MustJoin`, `Toolset.Wrap` with three middlewares
 - `gocode.WithLogging`, `WithTimeout`, `WithResultLimit`
-- Built-ins: `agent/tools/clock`, `agent/tools/workspace` (read-only)
+- Built-ins: `tools/clock`, `tools/workspace` (read-only)

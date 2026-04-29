@@ -30,4 +30,4 @@ recipe second to see what each layer adds.
 - `gocode.Client.Loop`
 - `gocode.Join`, `gocode.Toolset`
 - `gocode.NewUserMessage`, `gocode.TextContent`
-- Built-ins: `agent/tools/clock`, `agent/tools/math`
+- Built-ins: `tools/clock`, `tools/math`

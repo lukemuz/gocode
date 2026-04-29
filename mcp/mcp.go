@@ -153,7 +153,7 @@ type mcpTool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-// mcpToolToAgent converts an MCP wire tool into an gocode.Tool.
+// mcpToolToAgent converts an MCP wire tool into a gocode.Tool.
 // The inputSchema from MCP is already JSON Schema, so we pass it through
 // as raw bytes rather than re-serialising through gocode.InputSchema.
 func mcpToolToAgent(mt mcpTool) (gocode.Tool, error) {
@@ -168,7 +168,7 @@ func mcpToolToAgent(mt mcpTool) (gocode.Tool, error) {
 	}, nil
 }
 
-// makeToolFunc returns an gocode.ToolFunc that calls the named MCP tool.
+// makeToolFunc returns a gocode.ToolFunc that calls the named MCP tool.
 func (s *Server) makeToolFunc(toolName string) gocode.ToolFunc {
 	return func(ctx context.Context, input json.RawMessage) (string, error) {
 		params := map[string]interface{}{

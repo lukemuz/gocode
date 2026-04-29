@@ -1,4 +1,4 @@
-# Recipe 01: agent with tools
+# Recipe 02: agent with tools
 
 The entry-point recipe. Smallest possible "I'm building a real thing"
 example: an `Agent` with a curated toolset, middleware, context
@@ -18,7 +18,7 @@ management, and streamed output.
   output is cleared cleanly when a retry happens mid-stream
 
 What it deliberately omits: subagents (recipe 04), persistence (recipe 05),
-HTTP/SSE (recipe 06), batch (recipe 08). Each later recipe layers one
+parallel pipelines (recipe 06). Each later recipe layers one
 dimension on top of this base.
 
 ## Run
@@ -37,4 +37,4 @@ go run ./examples/recipes/02-agent-with-tools -dir . "How many .go files are in 
 - `gocode.WithTimeout`, `gocode.WithResultLimit`, `gocode.WithLogging`
 - `gocode.ContextManager`
 - `gocode.NewStreamBuffer` (retry-aware streaming)
-- Built-ins: `agent/tools/clock`, `agent/tools/math`, `agent/tools/workspace`
+- Built-ins: `tools/clock`, `tools/math`, `tools/workspace`

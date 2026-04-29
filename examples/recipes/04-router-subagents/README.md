@@ -30,7 +30,7 @@ go run ./examples/recipes/04-router-subagents -dir . "What does this project do,
 - `gocode.NewTypedTool` with a `{task: string}` schema
 - `gocode.Join` to compose toolsets
 - `gocode.Toolset` with `ToolMetadata.Source` annotations
-- Built-in tools: `agent/tools/clock`, `agent/tools/workspace` (read-only)
+- Built-in tools: `tools/clock`, `tools/workspace` (read-only)
 
 ## ADK comparison
 
