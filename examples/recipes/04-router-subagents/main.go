@@ -52,10 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cheap, err := agent.New(agent.Config{Provider: provider, Model: agent.ModelHaiku, MaxTokens: 4096})
-	if err != nil {
-		log.Fatal(err)
-	}
+	cheap := smart.WithModel(agent.ModelHaiku)
 
 	// Research subagent: workspace + clock, sandboxed to -dir.
 	ws, err := workspace.NewReadOnly(workspace.Config{Root: *dir})

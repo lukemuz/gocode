@@ -42,6 +42,19 @@ func New(cfg Config) (*Client, error) {
 	return &Client{cfg: cfg}, nil
 }
 
+// WithModel returns a new Client that shares the provider, MaxTokens, and
+// Retry config with c, but uses a different model. Useful for cost-tiering
+// — a cheap summarizer alongside a smart loop, for example. The returned
+// Client is independent: mutations to one do not affect the other.
+//
+// For more elaborate derivation (different MaxTokens, different Retry),
+// construct a fresh Client with agent.New.
+func (c *Client) WithModel(model string) *Client {
+	cfg := c.cfg
+	cfg.Model = model
+	return &Client{cfg: cfg}
+}
+
 // Ask makes a single LLM call and returns the model's reply as a Message.
 //
 // system sets the system prompt; pass "" to omit it.

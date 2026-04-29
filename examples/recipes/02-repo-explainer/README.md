@@ -39,28 +39,13 @@ Sessions are stored under `~/.repo-explainer/<id>.json`.
 
 ## Library features exercised
 
-- `agent.FileStore`, `agent.Session`, `agent.Save`, `agent.ErrSessionNotFound`
+- `agent.FileStore`, `agent.Session`, `agent.Save`, `agent.Load`,
+  `agent.ErrSessionNotFound`
 - `agent.ContextManager` with a real `Summarizer`
+- `agent.RenderForSummary` to flatten message history for the summarizer
+- `Client.WithModel` for cheap-summarizer cost-tiering
 - `agent.Assistant.StepStream`
 - `agent.NewStreamBuffer` paired with `RetryConfig.OnRetry`
 - `agent.MustJoin`, `Toolset.Wrap` with three middlewares
 - `agent.WithLogging`, `WithTimeout`, `WithResultLimit`
 - Built-ins: `agent/tools/clock`, `agent/tools/workspace` (read-only)
-- Two `*Client` values for cost-tiering: Sonnet for the loop, Haiku for
-  summarization
-
-## Notes on what was awkward
-
-Honest things this recipe surfaced that may inform future ergonomic work:
-
-- **Rendering history for the summarizer** is ~25 lines of plumbing
-  (`renderForSummary` plus `abbreviate`). A library helper —
-  `agent.RenderForSummary(messages) string` — would remove that, but it's
-  a minor convenience and was deliberately left out of the library to see
-  whether it actually recurs.
-- **Two-client construction** for cost-tiering is verbose because `Client`
-  has no derive-from method. A `client.With(Model: ModelHaiku)` shortcut
-  would help, but again — recurrence first, API change later.
-- **Session bootstrap** (`loadOrCreateSession`) is ~20 lines for what is
-  conceptually "open or create." The `Save` helper covers the write side
-  cleanly; the read side has no equivalent. Watch for this.

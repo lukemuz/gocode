@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -81,14 +80,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cheap, err := agent.New(agent.Config{
-		Provider:  provider,
-		Model:     agent.ModelHaiku,
-		MaxTokens: 1024,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+	cheap := smart.WithModel(agent.ModelHaiku)
 
 	// 2. Toolset: clock + read-only workspace sandboxed to -repo, with
 	// per-tool middleware for safety and observability.
@@ -114,7 +106,7 @@ func main() {
 		KeepFirst:  1,  // the user's original question
 		KeepRecent: 12, // recent turns and their tool cycles
 		Summarizer: func(sctx context.Context, trimmed []agent.Message) (string, error) {
-			rendered := renderForSummary(trimmed)
+			rendered := agent.RenderForSummary(trimmed, 0)
 			reply, err := cheap.Ask(sctx,
 				"You compress earlier portions of an investigation transcript. "+
 					"Preserve every concrete fact: file paths, line numbers, function "+
@@ -142,9 +134,21 @@ func main() {
 	}
 
 	// 5. Session: load if -session, append the new user turn, run, persist.
-	store, sess, err := loadOrCreateSession(ctx, *sessionID)
-	if err != nil {
-		log.Fatal(err)
+	var store agent.Store
+	sess := &agent.Session{}
+	if *sessionID != "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+		store, err = agent.NewFileStore(filepath.Join(home, ".repo-explainer"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		sess, err = agent.Load(ctx, store, *sessionID)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	sess.History = append(sess.History, agent.NewUserMessage(question))
 
@@ -178,69 +182,3 @@ func main() {
 		result.Usage.InputTokens, result.Usage.OutputTokens)
 }
 
-// loadOrCreateSession returns (nil, fresh-session, nil) when no -session was
-// requested, or (store, loaded-or-new-session, nil) when persistence is on.
-// A session ID resolves to ~/.repo-explainer/<id>.json.
-func loadOrCreateSession(ctx context.Context, id string) (agent.Store, *agent.Session, error) {
-	if id == "" {
-		return nil, &agent.Session{}, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, nil, err
-	}
-	dir := filepath.Join(home, ".repo-explainer")
-	store, err := agent.NewFileStore(dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	sess, err := store.Get(ctx, id)
-	switch {
-	case err == nil:
-		return store, sess, nil
-	case errors.Is(err, agent.ErrSessionNotFound):
-		return store, &agent.Session{ID: id}, nil
-	default:
-		return nil, nil, err
-	}
-}
-
-// renderForSummary produces a plain-text rendering of message history for
-// passing to the summarizer. Tool results are abridged so the summarizer
-// can see the structure without paying the full tool-output token cost.
-func renderForSummary(msgs []agent.Message) string {
-	var b strings.Builder
-	for _, m := range msgs {
-		switch m.Role {
-		case agent.RoleUser:
-			text := agent.TextContent(m)
-			if text != "" {
-				fmt.Fprintf(&b, "USER: %s\n", text)
-				continue
-			}
-			// Pure tool_result message.
-			for _, c := range m.Content {
-				if c.Type == agent.TypeToolResult {
-					fmt.Fprintf(&b, "TOOL_RESULT (%s): %s\n", c.ToolUseID, abbreviate(c.Content, 400))
-				}
-			}
-		case agent.RoleAssistant:
-			for _, c := range m.Content {
-				switch c.Type {
-				case agent.TypeText:
-					fmt.Fprintf(&b, "ASSISTANT: %s\n", c.Text)
-				case agent.TypeToolUse:
-					fmt.Fprintf(&b, "ASSISTANT_TOOL_USE: %s(%s)\n", c.Name, abbreviate(string(c.Input), 200))
-				}
-			}
-		}
-	}
-	return b.String()
-}
-
-func abbreviate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "...[truncated]"
-}
