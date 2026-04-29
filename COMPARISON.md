@@ -47,9 +47,9 @@ For any of those, ADK (or another framework) is the better fit.
 
 **Pick `gocode` when** your service is in Go, you want to debug agents by reading code, and you want explicit ownership of history, persistence, and the loop.
 
-## Two worked comparisons
+## Three worked comparisons
 
-Two patterns each prove a distinct philosophical claim. Other recipes live under `examples/recipes/`; they demonstrate the library but don't need an ADK comparison to make their point.
+Three patterns each prove a distinct philosophical claim. Other recipes live under `examples/recipes/`; they demonstrate the library but don't need an ADK comparison to make their point.
 
 ### 1. Router with specialists — *subagents are tools*
 
@@ -142,6 +142,54 @@ You give up **built-in scope semantics for state** (ADK's `app:` / `user:` / `te
 You get **no hidden mutation**, **trivial backend swap** (five-method interface), **failure atomicity** (nothing persists until you save, so a failed `Step` cannot corrupt the session), and **plain JSON on disk** that `cat`, `jq`, and diffs can read.
 
 Working version: [`examples/recipes/05-persistent-chat`](examples/recipes/05-persistent-chat).
+
+### 3. Parallel-then-sequential pipeline — *a workflow is just Go*
+
+Two model calls run concurrently; a third call consumes both outputs. The smallest workload that exercises fan-out followed by fan-in.
+
+**ADK shape (sketch).** ADK models this with workflow agents: a `ParallelAgent` runs two `LlmAgent`s side by side and writes their outputs into session state under named `output_key`s; a `SequentialAgent` then runs a follow-up `LlmAgent` whose instruction template reads those keys back. Composition happens by nesting agent objects; data flow happens through state keys.
+
+```python
+# Pseudocode
+rome   = LlmAgent(name="rome",   instruction="Summarize ...", output_key="rome_summary")
+athens = LlmAgent(name="athens", instruction="Summarize ...", output_key="athens_summary")
+fanout = ParallelAgent(name="fanout", sub_agents=[rome, athens])
+
+compare = LlmAgent(
+    name="compare",
+    instruction="Compare based on:\nRome: {rome_summary}\nAthens: {athens_summary}",
+)
+
+pipeline = SequentialAgent(name="pipeline", sub_agents=[fanout, compare])
+runner   = Runner(agent=pipeline, session_service=...)
+```
+
+**`gocode` shape.** Fan-out is a goroutine helper; fan-in is a function call. The data flow is local variables, top to bottom.
+
+```go
+results := agent.Parallel(ctx,
+    func(ctx context.Context) (string, error) {
+        return ask(ctx, client, "Summarize the rise of the Roman Empire ...")
+    },
+    func(ctx context.Context) (string, error) {
+        return ask(ctx, client, "Summarize the rise of the Athenian city-state ...")
+    },
+)
+for i, r := range results {
+    if r.Err != nil { return r.Err }
+}
+
+comparison, err := ask(ctx, client, fmt.Sprintf(
+    "Compare ...\n\nRome: %s\n\nAthens: %s",
+    results[0].Value, results[1].Value,
+))
+```
+
+You give up **declarative composition** (no `ParallelAgent` / `SequentialAgent` objects you can list, introspect, or visualize as a graph) and the **state-key wiring** that lets ADK render templated instructions from prior steps' outputs.
+
+You get **visible data flow** (the comparison prompt's inputs are local variables on the line above), **per-step error handling without a callback API** (each `Result` carries its own `Err`; the caller picks fail-fast or degrade), **arbitrary control flow between stages** (loops, conditions, retries are ordinary Go — no new agent type per shape), and **type safety end to end** (`Parallel[T]` is generic over the step's return type).
+
+Working version: [`examples/recipes/06-parallel-pipeline`](examples/recipes/06-parallel-pipeline).
 
 ## What `gocode` will not become
 
