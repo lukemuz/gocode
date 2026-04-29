@@ -513,6 +513,8 @@ toolset, err := server.Toolset(ctx)
 result, err := client.Loop(ctx, system, history, toolset.Tools, toolset.Dispatch, 10)
 ```
 
+MCP is also `gocode`'s answer to the broader tool ecosystem. Vector databases, document parsers, embedding APIs, web search adapters, and language-specific integrations increasingly expose MCP servers — many already implemented in Python, TypeScript, or Rust. Rather than porting those client libraries to Go, users connect to an MCP server and the tools become ordinary `agent.Tool` definitions. This is the polyglot tool bridge: Go handles orchestration, tools live in whatever language makes sense. Users should not need to choose between Go's production characteristics and the Python/TypeScript tool ecosystem.
+
 Principles:
 
 - MCP tools should become ordinary `agent.Tool` definitions and ordinary `agent.ToolFunc` handlers
@@ -1038,6 +1040,14 @@ Problem:
 
 Real applications need conversation history to survive across requests and restarts.
 
+**Two-tier persistence model.**
+
+Persistence is two distinct problems with different solutions:
+
+- **Conversation-level persistence**: save and reload `[]Message`. Because history is append-only and fully JSON-serializable, this maps directly to a `Store` interface. Crash before a step — reload history, resume from the last good state. Human-in-the-loop pause/resume, conversation forking, session sharing: all handled. This covers the 80% case.
+
+- **Durable tool execution**: if the agent crashes *while a tool is executing*, history has a `tool_use` block with no matching `tool_result`. Reloading history and resuming may re-execute a side-effectful tool — file writes, API calls, payments. This is the exactly-once problem. It is addressed separately in P2.3 via a `WithIdempotency` middleware that uses tool-use IDs as idempotency keys.
+
 Goal:
 
 Add a minimal `Session` and `Store` abstraction that remains a transparent wrapper around `[]Message`.
@@ -1088,7 +1098,57 @@ session.History = result.Messages
 
 The core should not add a `Runner` abstraction that owns this flow.
 
-### 3. Observability hooks
+### 3. Durable tool execution
+
+Priority: medium.
+
+Problem:
+
+Conversation persistence (saving and reloading `[]Message`) handles the common case cleanly, but it does not handle mid-tool-call crashes.
+
+If an agent crashes while a tool is executing, history contains a `tool_use` block with no matching `tool_result`. On reload, you face a genuine ambiguity: did the tool finish? Did it partially complete? Re-executing a side-effectful tool — a file write, an API call, a database mutation — may cause double execution. With concurrent tool execution this is sharper: if three tools run in parallel and the process dies after two complete, history does not record which ones finished.
+
+Tool-use IDs (already stable and unique in the message format) can serve as idempotency keys.
+
+Goal:
+
+Provide a `WithIdempotency` middleware and a minimal `ToolResultStore` interface. Before executing a tool, the middleware checks the store; if a result for that tool-use ID already exists, it returns the cached result without re-executing. After executing, it persists the result to the store. On crash-resume, any tool that completed before the crash returns its cached result; any tool that did not complete re-executes cleanly.
+
+Possible API:
+
+~~~go
+type ToolResultStore interface {
+    Get(ctx context.Context, toolUseID string) (string, bool, error)
+    Put(ctx context.Context, toolUseID string, result string) error
+}
+
+func WithIdempotency(store ToolResultStore) Middleware
+~~~
+
+Resume pattern:
+
+~~~go
+// Load history (may contain unmatched tool_use blocks from a crash).
+history, _ := convStore.Load(ctx, sessionID)
+
+// Completed tools return cached results; incomplete ones re-execute.
+toolset = toolset.Wrap(agent.WithIdempotency(idempotencyStore))
+
+result, err := a.Step(ctx, history)
+~~~
+
+Built-in stores: in-memory (tests and development), file-backed (single-instance apps). External stores (Redis, SQL) are left to callers.
+
+Principles:
+
+- tool-use IDs are already stable in the message format — no new ID scheme needed
+- the middleware is opt-in; most apps that use idempotent tools or short-lived processes do not need it
+- the store interface is minimal and implementation-agnostic
+- this gets you to "no duplicate execution at the agent level after crash-resume"
+- it does not guarantee exactly-once delivery across all infrastructure — external state changes still require tool-level idempotency or rollback; document the boundary clearly
+- the middleware composes with logging, confirmation, and timeout wrappers in the normal way
+
+### 4. Observability hooks
 
 Priority: medium.
 
@@ -1112,6 +1172,18 @@ type Hooks struct {
 }
 ```
 
+**OpenTelemetry adapter.**
+
+The hooks above emit the right events; what is missing is a thin adapter that wires them to OpenTelemetry spans. Provide an `agent/otel` sub-package:
+
+~~~go
+// otel.HooksFromTracer returns an agent.Hooks that creates OTel spans
+// around each step and, once per-tool-call hooks exist, around each tool call.
+func HooksFromTracer(tracer trace.Tracer) agent.Hooks
+~~~
+
+With this adapter, Jaeger, Honeycomb, Datadog, and any other OTel-compatible backend work out of the box. The adapter is a translation layer over the hooks that already exist — no changes to the core package are needed.
+
 Principles:
 
 - zero value means no hooks
@@ -1120,8 +1192,9 @@ Principles:
 - hooks should not become middleware
 - hooks should not hide execution flow
 - callbacks should be documented as synchronous or asynchronous
+- the OTel adapter is a separate sub-package with its own dependency on `go.opentelemetry.io/otel`; the core `agent` package has no OTel dependency
 
-### 4. Extended model configuration
+### 5. Extended model configuration
 
 Priority: medium.
 
@@ -1158,7 +1231,7 @@ Principles:
 - keep the common case short
 - allow advanced users to take on complexity explicitly
 
-### 5. Testing helpers
+### 6. Testing helpers
 
 Priority: medium.
 
@@ -1198,7 +1271,7 @@ Principles:
 - do not assert exact LLM text in library examples
 - encourage testing history shape, tool calls, errors, and usage
 
-### 6. ADK comparison doc
+### 7. ADK comparison doc
 
 Priority: medium.
 
@@ -1240,7 +1313,7 @@ Principles:
 - emphasize visible control flow
 - do not frame the goal as feature parity
 
-### 7. HTTP/SSE service example
+### 8. HTTP/SSE service example
 
 Priority: medium.
 
@@ -1393,26 +1466,27 @@ You can build many of these things on top of `gocode`, but the core library shou
 | Order | Item | Priority | Status |
 |---|---|---|---|
 | 1 | Provider setup helpers | P1 | Done |
-| 2 | Parallel tool execution | P1 | Next |
-| 3 | Safe pre-built tools (incl. `workspace edit file`) | P1 | Next |
-| 4 | Native MCP support | P1 | Next |
+| 2 | Parallel tool execution | P1 | Done |
+| 3 | Safe pre-built tools (incl. `workspace edit file`) | P1 | Done |
+| 4 | Native MCP support | P1 | Done |
 | 5 | Native skills support | P1 | Next |
-| 6 | Tool bindings/toolsets/dispatch helpers (incl. `WithConfirmation`) | P1 | Next |
-| 7 | Explicit context management | P1 | Next |
-| 8 | Basic, extensible agent block (P1 centerpiece) | P1 | Next |
+| 6 | Tool bindings/toolsets/dispatch helpers (incl. `WithConfirmation`) | P1 | Done |
+| 7 | Explicit context management | P1 | Done |
+| 8 | Basic, extensible agent block (P1 centerpiece) | P1 | Done |
 | 9 | Streaming retry semantics | P1 | Next |
 | 10 | Compelling example app (repo explainer) | P1 | Next |
 | 11 | Recipes documentation | P1 | Next |
 | 12 | Assistant hardening | P2 | Planned |
 | 13 | Boring sessions, but no runner | P2 | Planned |
-| 14 | Observability hooks | P2 | Planned |
-| 15 | Extended model configuration | P2 | Planned |
-| 16 | Testing helpers | P2 | Planned |
-| 17 | ADK comparison doc | P2 | Planned |
-| 18 | HTTP/SSE service example | P2 | Planned |
-| 19 | Evaluation helpers | P3 | Future |
-| 20 | Lightweight multi-agent composition | P3 | Future / cautious |
-| 21 | Cross-session memory | P3 | Future / likely separate package |
+| 14 | Durable tool execution (`WithIdempotency`) | P2 | Planned |
+| 15 | Observability hooks + OpenTelemetry adapter | P2 | Planned |
+| 16 | Extended model configuration | P2 | Planned |
+| 17 | Testing helpers | P2 | Planned |
+| 18 | ADK comparison doc | P2 | Planned |
+| 19 | HTTP/SSE service example | P2 | Planned |
+| 20 | Evaluation helpers | P3 | Future |
+| 21 | Lightweight multi-agent composition | P3 | Future / cautious |
+| 22 | Cross-session memory | P3 | Future / likely separate package |
 
 ---
 
@@ -1431,6 +1505,12 @@ The highest-leverage work is:
 7. streaming retry semantics locked down before P2 multiplies the surface
 8. one compelling real example app that acts as the integration test for P1
 9. small, copy-pasteable recipes
+
+Production helpers (P2) close the remaining gaps:
+
+- **Sessions + Store**: conversation-level persistence; history is the state, the store is the sink
+- **Durable tool execution**: `WithIdempotency` + `ToolResultStore` for crash-resume without double execution
+- **OpenTelemetry adapter**: `agent/otel` wires existing hooks to spans; no OTel dependency in core
 
 Production helpers should follow the same rule:
 
