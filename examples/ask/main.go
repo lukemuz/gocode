@@ -11,9 +11,15 @@ import (
 )
 
 func main() {
-	client, err := agent.New(agent.Config{
+	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
 		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-		Model:  agent.ModelSonnet,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	client, err := agent.New(agent.Config{
+		Provider: provider,
+		Model:    agent.ModelSonnet,
 	})
 	if err != nil {
 		log.Fatal(err)

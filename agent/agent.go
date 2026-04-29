@@ -3,19 +3,17 @@ package agent
 import (
 	"context"
 	"fmt"
-	"net/http"
 )
 
-// Config holds everything needed to connect to the Anthropic API.
+// Config holds everything needed to create a Client.
 type Config struct {
-	APIKey     string       // required
-	Model      string       // required; use ModelSonnet, ModelOpus, or ModelHaiku
-	MaxTokens  int          // max tokens per response; defaults to 1024
-	BaseURL    string       // API endpoint; defaults to https://api.anthropic.com
-	HTTPClient *http.Client // defaults to a 60-second timeout client
+	Provider  Provider    // required — the LLM backend to use
+	Model     string      // required — provider-specific model identifier
+	MaxTokens int         // max tokens per response; defaults to 1024
+	Retry     RetryConfig // controls automatic retry behaviour for transient API errors
 }
 
-// Well-known model identifiers.
+// Well-known Anthropic model identifiers.
 const (
 	ModelOpus   = "claude-opus-4-7"
 	ModelSonnet = "claude-sonnet-4-6"
@@ -30,22 +28,16 @@ type Client struct {
 }
 
 // New creates a Client from cfg, filling in defaults for zero-value fields.
-// Returns an error if APIKey or Model is empty.
+// Returns an error if Provider or Model is empty.
 func New(cfg Config) (*Client, error) {
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("agent: Config.APIKey is required")
+	if cfg.Provider == nil {
+		return nil, fmt.Errorf("agent: Config.Provider is required")
 	}
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("agent: Config.Model is required")
 	}
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = defaultMaxTokens
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = defaultBaseURL
-	}
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return &Client{cfg: cfg}, nil
 }
@@ -56,11 +48,37 @@ func New(cfg Config) (*Client, error) {
 // history is the conversation so far and is not modified by Ask.
 // Append the returned Message to your history slice to continue the conversation.
 func (c *Client) Ask(ctx context.Context, system string, history []Message) (Message, error) {
-	resp, err := c.do(ctx, anthropicRequest{
+	req := ProviderRequest{
 		Model:     c.cfg.Model,
 		MaxTokens: c.cfg.MaxTokens,
 		System:    system,
 		Messages:  history,
+	}
+	resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
+		return c.cfg.Provider.Call(ctx, req)
+	})
+	if err != nil {
+		return Message{}, err
+	}
+	return Message{Role: RoleAssistant, Content: resp.Content}, nil
+}
+
+// AskStream is the streaming variant of Ask. It invokes the onToken
+// callback for every ContentBlock delta delivered by the provider
+// (typically incremental TypeText blocks). The final assembled
+// Message is returned once the stream completes. history is not
+// modified by this call. The callWithRetry wrapper is used, so
+// the callback may fire for partial content on any failed retry
+// attempts before a successful one.
+func (c *Client) AskStream(ctx context.Context, system string, history []Message, onToken func(ContentBlock)) (Message, error) {
+	req := ProviderRequest{
+		Model:     c.cfg.Model,
+		MaxTokens: c.cfg.MaxTokens,
+		System:    system,
+		Messages:  history,
+	}
+	resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
+		return c.cfg.Provider.Stream(ctx, req, onToken)
 	})
 	if err != nil {
 		return Message{}, err
@@ -96,12 +114,15 @@ func (c *Client) Loop(
 	var total Usage
 
 	for iter := 0; maxIter == 0 || iter < maxIter; iter++ {
-		resp, err := c.do(ctx, anthropicRequest{
+		req := ProviderRequest{
 			Model:     c.cfg.Model,
 			MaxTokens: c.cfg.MaxTokens,
 			System:    system,
 			Messages:  msgs,
 			Tools:     tools,
+		}
+		resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
+			return c.cfg.Provider.Call(ctx, req)
 		})
 		if err != nil {
 			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
@@ -119,6 +140,74 @@ func (c *Client) Loop(
 			if err != nil {
 				return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
 			}
+			msgs = append(msgs, NewToolResultMessage(results))
+
+		case "max_tokens":
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{
+				Iter:  iter,
+				Cause: fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens"),
+			}
+
+		default:
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{
+				Iter:  iter,
+				Cause: fmt.Errorf("unexpected stop_reason %q", resp.StopReason),
+			}
+		}
+	}
+	return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: maxIter, Cause: ErrMaxIter}
+}
+
+// LoopStream is the streaming variant of Loop. It mirrors Loop's structure,
+// control flow, error handling, stop-reason switching, maxIter limiting, and
+// history/usage accumulation but invokes Provider.Stream (wrapped by
+// callWithRetry) on every iteration so that onToken receives each
+// ContentBlock delta as it arrives. After runTools completes, onToolResult
+// is called with the results (allowing live UI updates or logging) before
+// the tool results are appended and the loop continues. The onToken callback
+// may fire multiple times for a given turn if retries occur.
+func (c *Client) LoopStream(
+	ctx context.Context,
+	system string,
+	history []Message,
+	tools []Tool,
+	dispatch map[string]ToolFunc,
+	maxIter int,
+	onToken func(ContentBlock),
+	onToolResult func([]ToolResult),
+) (LoopResult, error) {
+	msgs := make([]Message, len(history))
+	copy(msgs, history)
+	var total Usage
+
+	for iter := 0; maxIter == 0 || iter < maxIter; iter++ {
+		req := ProviderRequest{
+			Model:     c.cfg.Model,
+			MaxTokens: c.cfg.MaxTokens,
+			System:    system,
+			Messages:  msgs,
+			Tools:     tools,
+		}
+		resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
+			return c.cfg.Provider.Stream(ctx, req, onToken)
+		})
+		if err != nil {
+			return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
+		}
+		total.InputTokens += resp.Usage.InputTokens
+		total.OutputTokens += resp.Usage.OutputTokens
+		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Content})
+
+		switch resp.StopReason {
+		case "end_turn":
+			return LoopResult{Messages: msgs, Usage: total}, nil
+
+		case "tool_use":
+			results, err := runTools(ctx, resp.Content, dispatch)
+			if err != nil {
+				return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
+			}
+			onToolResult(results)
 			msgs = append(msgs, NewToolResultMessage(results))
 
 		case "max_tokens":

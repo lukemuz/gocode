@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -11,44 +10,28 @@ import (
 	"github.com/lukemuz/gocode/agent"
 )
 
+type ListDirInput struct {
+	Path string `json:"path"`
+}
+
+type ReadFileInput struct {
+	Path string `json:"path"`
+}
+
 func main() {
 	ctx := context.Background()
 
-	// Define tools by name + description + explicit JSON Schema.
-	// No framework magic — what you write is what the model sees.
-	listDir, err := agent.NewTool("list_dir", "List the files in a directory.", agent.InputSchema{
-		Type: "object",
-		Properties: map[string]agent.SchemaProperty{
-			"path": {Type: "string", Description: "Path to the directory"},
-		},
-		Required: []string{"path"},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	readFile, err := agent.NewTool("read_file", "Read the contents of a file.", agent.InputSchema{
-		Type: "object",
-		Properties: map[string]agent.SchemaProperty{
-			"path": {Type: "string", Description: "Path to the file"},
-		},
-		Required: []string{"path"},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// dispatch maps each tool name to its Go implementation.
-	// The model calls the tool; this code runs it.
-	dispatch := map[string]agent.ToolFunc{
-		"list_dir": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var params struct {
-				Path string `json:"path"`
-			}
-			if err := json.Unmarshal(input, &params); err != nil {
-				return "", err
-			}
-			entries, err := os.ReadDir(params.Path)
+	// NewTypedTool + schema builders (Object/String/Required) provide
+	// both Tool and ToolFunc with minimal boilerplate. Schema helpers
+	// are now implemented (see ROADMAP.md).
+	listDirTool, listDirFn, err := agent.NewTypedTool[ListDirInput](
+		"list_dir",
+		"List the files in a directory.",
+		agent.Object(
+			agent.String("path", "Path to the directory", agent.Required()),
+		),
+		func(_ context.Context, in ListDirInput) (string, error) {
+			entries, err := os.ReadDir(in.Path)
 			if err != nil {
 				return "", err
 			}
@@ -56,26 +39,44 @@ func main() {
 			for i, e := range entries {
 				names[i] = e.Name()
 			}
-			data, _ := json.Marshal(names)
-			return string(data), nil
+			return agent.JSONResult(names)
 		},
-		"read_file": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var params struct {
-				Path string `json:"path"`
-			}
-			if err := json.Unmarshal(input, &params); err != nil {
-				return "", err
-			}
-			data, err := os.ReadFile(params.Path)
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	readFileTool, readFileFn, err := agent.NewTypedTool[ReadFileInput](
+		"read_file",
+		"Read the contents of a file.",
+		agent.Object(
+			agent.String("path", "Path to the file", agent.Required()),
+		),
+		func(_ context.Context, in ReadFileInput) (string, error) {
+			data, err := os.ReadFile(in.Path)
 			if err != nil {
 				return "", err
 			}
 			return string(data), nil
 		},
+	)
+	if err != nil {
+		log.Fatal(err)
 	}
 
+	dispatch := map[string]agent.ToolFunc{
+		"list_dir":  listDirFn,
+		"read_file": readFileFn,
+	}
+
+	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
+		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	client, err := agent.New(agent.Config{
-		APIKey:    os.Getenv("ANTHROPIC_API_KEY"),
+		Provider:  provider,
 		Model:     agent.ModelSonnet,
 		MaxTokens: 2048,
 	})
@@ -93,7 +94,7 @@ func main() {
 		ctx,
 		"You are a helpful assistant with access to the local filesystem.",
 		history,
-		[]agent.Tool{listDir, readFile},
+		[]agent.Tool{listDirTool, readFileTool},
 		dispatch,
 		10, // max iterations
 	)

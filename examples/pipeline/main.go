@@ -13,8 +13,14 @@ import (
 func main() {
 	ctx := context.Background()
 
+	provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
+		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	client, err := agent.New(agent.Config{
-		APIKey:    os.Getenv("ANTHROPIC_API_KEY"),
+		Provider:  provider,
 		Model:     agent.ModelSonnet,
 		MaxTokens: 512,
 	})
