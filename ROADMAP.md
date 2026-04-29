@@ -58,7 +58,7 @@ P1 focuses on completing the path from primitives to useful local assistants.
 ### 1. Native skills support
 
 **Priority:** high  
-**Status:** next
+**Status:** done
 
 A skill is an inspectable bundle of instructions, tools, examples, and metadata. It is not an autonomous agent and does not own a loop.
 
