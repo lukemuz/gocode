@@ -154,11 +154,13 @@ tool, fn, err := agent.NewTypedTool(
 )
 ~~~
 
-Tools still compile down to ordinary values:
+Tools still compile down to ordinary values. A `Toolset` is just an ordered
+slice of `ToolBinding{Tool, Func, Meta}` you can build literally:
 
 ~~~go
-tools := []agent.Tool{tool}
-dispatch := map[string]agent.ToolFunc{tool.Name: fn}
+tools := agent.Toolset{Bindings: []agent.ToolBinding{
+    {Tool: tool, Func: fn},
+}}
 ~~~
 
 There is no hidden registry.
@@ -191,13 +193,16 @@ It uses goroutines. It is a helper, not a scheduler.
 Use `Loop` when the model can call tools.
 
 ~~~go
-result, err := client.Loop(ctx, system, history, tools, dispatch, 5)
+result, err := client.Loop(ctx, system, history, tools, 5)
 if err != nil {
     log.Fatal(err)
 }
 
 history = result.Messages
+fmt.Println(result.FinalText())
 ~~~
+
+`tools` is an `agent.Toolset` — see the assembly section below.
 
 `Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit is reached.
 
@@ -219,32 +224,26 @@ results := agent.Parallel(ctx,
             ctx,
             "You are a research assistant. Use your tools to gather facts.",
             []agent.Message{agent.NewUserMessage(task)},
-            researchTools.Tools(),
-            researchTools.Dispatch(),
+            researchTools,
             8,
         )
         if err != nil {
             return SubagentOutput{}, err
         }
-
-        last := result.Messages[len(result.Messages)-1]
-        return SubagentOutput{Name: "research", Text: agent.TextContent(last)}, nil
+        return SubagentOutput{Name: "research", Text: result.FinalText()}, nil
     },
     func(ctx context.Context) (SubagentOutput, error) {
         result, err := client.Loop(
             ctx,
             "You are an implementation assistant. Use your tools to inspect code.",
             []agent.Message{agent.NewUserMessage(task)},
-            codeTools.Tools(),
-            codeTools.Dispatch(),
+            codeTools,
             8,
         )
         if err != nil {
             return SubagentOutput{}, err
         }
-
-        last := result.Messages[len(result.Messages)-1]
-        return SubagentOutput{Name: "implementation", Text: agent.TextContent(last)}, nil
+        return SubagentOutput{Name: "implementation", Text: result.FinalText()}, nil
     },
 )
 
@@ -288,19 +287,18 @@ The primitive APIs remain available, but common agent assembly has helpers.
 `Toolset` bundles tool definitions with their implementations and metadata.
 
 ~~~go
-toolset, err := agent.Join(clockTool.Toolset(), workspaceToolset)
-if err != nil {
-    log.Fatal(err)
-}
-
-toolset = toolset.Wrap(
+toolset := agent.MustJoin(clockTool.Toolset(), workspaceToolset).Wrap(
     agent.WithTimeout(5*time.Second),
     agent.WithResultLimit(20_000),
     agent.WithConfirmation(confirm),
 )
 
-result, err := client.Loop(ctx, system, history, toolset.Tools(), toolset.Dispatch(), 10)
+result, err := client.Loop(ctx, system, history, toolset, 10)
 ~~~
+
+Use `MustJoin` for static composition where a duplicate tool name is a
+programmer error. Use `Join` (which returns an error) when toolsets are
+combined dynamically.
 
 Available middleware:
 
@@ -324,7 +322,7 @@ cm := agent.ContextManager{
 }
 
 trimmed, err := cm.Trim(ctx, history)
-result, err := client.Loop(ctx, system, trimmed, tools, dispatch, 10)
+result, err := client.Loop(ctx, system, trimmed, tools, 10)
 ~~~
 
 The original history is not mutated. Tool-use/tool-result integrity is preserved. Summarization happens only if you configure a summarizer.
@@ -376,7 +374,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-toolset, err := agent.Join(clockTool.Toolset(), ws.Toolset())
+toolset := agent.MustJoin(clockTool.Toolset(), ws.Toolset())
 ~~~
 
 Use `workspace.NewReadOnly` for read-only filesystem access. Use `workspace.New` only when you want the `edit_file` tool, and consider wrapping it with `WithConfirmation`.
@@ -393,7 +391,7 @@ if err != nil {
 defer srv.Close()
 
 mcpTools, err := srv.Toolset(ctx)
-result, err := client.Loop(ctx, system, history, mcpTools.Tools(), mcpTools.Dispatch(), 10)
+result, err := client.Loop(ctx, system, history, mcpTools, 10)
 ~~~
 
 MCP support is explicit: you choose the server, inspect the tools, and pass them into the loop.

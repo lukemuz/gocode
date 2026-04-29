@@ -670,7 +670,7 @@ func TestClientLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	history := []Message{NewUserMessage("start conversation")}
-	result, err := c.Loop(context.Background(), "system", history, nil, nil, 0)
+	result, err := c.Loop(context.Background(), "system", history, Toolset{}, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestClientLoopStream(t *testing.T) {
 	var toolCalls int
 	onToolResult := func([]ToolResult) { toolCalls++ }
 	history := []Message{NewUserMessage("start")}
-	result, err := c.LoopStream(context.Background(), "system", history, nil, nil, 0, onToken, onToolResult)
+	result, err := c.LoopStream(context.Background(), "system", history, Toolset{}, 0, onToken, onToolResult)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -896,7 +896,11 @@ func TestLoop(t *testing.T) {
 			}
 			c, _ := New(Config{Provider: p, Model: "test-model"})
 			history := []Message{NewUserMessage("hi")}
-			result, err := c.Loop(context.Background(), "sys", history, tt.tools, tt.dispatch, tt.maxIter)
+			ts := Toolset{}
+			for _, tool := range tt.tools {
+				ts.Bindings = append(ts.Bindings, ToolBinding{Tool: tool, Func: tt.dispatch[tool.Name]})
+			}
+			result, err := c.Loop(context.Background(), "sys", history, ts, tt.maxIter)
 			if tt.wantErr != nil {
 				found := errors.Is(err, tt.wantErr)
 				if !found {
@@ -935,7 +939,7 @@ func TestLoopStream(t *testing.T) {
 	onToken := func(ContentBlock) { tokenCount++ }
 	onTool := func([]ToolResult) { toolCount++ }
 	history := []Message{NewUserMessage("hi")}
-	result, err := c.LoopStream(context.Background(), "sys", history, nil, nil, 0, onToken, onTool)
+	result, err := c.LoopStream(context.Background(), "sys", history, Toolset{}, 0, onToken, onTool)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -969,7 +973,7 @@ func TestLoopStreamNilCallbacks(t *testing.T) {
 	p.Deltas = []ContentBlock{{Type: TypeText, Text: "hello"}}
 	c, _ := New(Config{Provider: p, Model: "test-model"})
 	// Both nil — must not panic even when provider fires deltas.
-	_, err := c.LoopStream(context.Background(), "", []Message{NewUserMessage("hi")}, nil, nil, 0, nil, nil)
+	_, err := c.LoopStream(context.Background(), "", []Message{NewUserMessage("hi")}, Toolset{}, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

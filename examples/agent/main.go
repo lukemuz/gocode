@@ -64,10 +64,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dispatch := map[string]agent.ToolFunc{
-		"list_dir":  listDirFn,
-		"read_file": readFileFn,
-	}
+	tools := agent.Toolset{Bindings: []agent.ToolBinding{
+		{Tool: listDirTool, Func: listDirFn},
+		{Tool: readFileTool, Func: readFileFn},
+	}}
 
 	provider, err := agent.NewAnthropicProviderFromEnv()
 	if err != nil {
@@ -92,16 +92,13 @@ func main() {
 		ctx,
 		"You are a helpful assistant with access to the local filesystem.",
 		history,
-		[]agent.Tool{listDirTool, readFileTool},
-		dispatch,
+		tools,
 		10, // max iterations
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// The last message in the history is always the final assistant reply.
-	last := result.Messages[len(result.Messages)-1]
-	fmt.Println(agent.TextContent(last))
+	fmt.Println(result.FinalText())
 	fmt.Printf("\ntokens: %d in, %d out\n", result.Usage.InputTokens, result.Usage.OutputTokens)
 }

@@ -36,21 +36,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tools, err := agent.Join(clock.New().Toolset(), math.New().Toolset())
-	if err != nil {
-		log.Fatal(err)
-	}
+	tools := agent.MustJoin(clock.New().Toolset(), math.New().Toolset())
 
 	result, err := client.Loop(
 		context.Background(),
 		"You are a concise helper. Use your tools when they would give a more accurate answer than guessing.",
 		[]agent.Message{agent.NewUserMessage(question)},
-		tools.Tools(), tools.Dispatch(),
+		tools,
 		5,
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(agent.TextContent(result.Messages[len(result.Messages)-1]))
+	fmt.Println(result.FinalText())
 }

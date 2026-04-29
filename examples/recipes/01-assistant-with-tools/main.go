@@ -86,15 +86,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	tools, err := agent.Join(
+	tools := agent.MustJoin(
 		clock.New().Toolset(),
 		math.New().Toolset(),
 		ws.Toolset(),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	tools = tools.Wrap(
+	).Wrap(
 		agent.WithLogging(logger),
 		agent.WithTimeout(5*time.Second),
 		agent.WithResultLimit(16*1024),

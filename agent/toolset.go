@@ -31,14 +31,16 @@ type ToolMetadata struct {
 	SafetyNotes          []string
 }
 
-// Toolset is an ordered collection of ToolBindings. It produces the
-// []Tool and map[string]ToolFunc slices that Client.Loop and
-// Client.LoopStream expect.
+// Toolset is an ordered collection of ToolBindings. It is the input shape
+// for Client.Loop and Client.LoopStream. Tools() and Dispatch() expose the
+// raw slice and map for callers that want to inspect or use them directly.
 type Toolset struct {
 	Bindings []ToolBinding
 }
 
-// Tools returns the Tool slice for passing to Client.Loop or Client.LoopStream.
+// Tools returns the Tool slice — the model-facing definitions — derived
+// from the bindings. Useful for inspection or for callers building their
+// own loop on top of the primitive provider interfaces.
 func (t Toolset) Tools() []Tool {
 	tools := make([]Tool, len(t.Bindings))
 	for i, b := range t.Bindings {
@@ -47,7 +49,7 @@ func (t Toolset) Tools() []Tool {
 	return tools
 }
 
-// Dispatch returns the dispatch map for passing to Client.Loop or Client.LoopStream.
+// Dispatch returns the name→func map derived from the bindings.
 func (t Toolset) Dispatch() map[string]ToolFunc {
 	m := make(map[string]ToolFunc, len(t.Bindings))
 	for _, b := range t.Bindings {
@@ -71,6 +73,18 @@ func Join(sets ...Toolset) (Toolset, error) {
 		}
 	}
 	return result, nil
+}
+
+// MustJoin is like Join but panics on duplicate tool names. It is intended
+// for static composition of toolsets at program startup, where a duplicate
+// is a programmer error rather than a runtime condition. Follows the
+// regexp.MustCompile / template.Must convention.
+func MustJoin(sets ...Toolset) Toolset {
+	t, err := Join(sets...)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 // Middleware is a function that wraps a ToolBinding's Func with additional

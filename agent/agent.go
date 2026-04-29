@@ -101,22 +101,41 @@ type LoopResult struct {
 	Usage    Usage     // total tokens consumed across all iterations
 }
 
+// Final returns the last message in Messages, which is conventionally the
+// final assistant reply. Returns the zero Message if Messages is empty.
+func (r LoopResult) Final() Message {
+	if len(r.Messages) == 0 {
+		return Message{}
+	}
+	return r.Messages[len(r.Messages)-1]
+}
+
+// FinalText returns the concatenated text of the final assistant message.
+// Equivalent to TextContent(r.Final()). Returns "" if no messages are present.
+func (r LoopResult) FinalText() string {
+	return TextContent(r.Final())
+}
+
 // Loop runs the agent in a tool-use loop until the model signals end_turn or
 // an error occurs. It returns the full conversation including all new turns.
 //
-// tools is the list of tools advertised to the model on every call.
-// dispatch maps each tool name to its Go implementation. A tool name that
-// appears in a model response but is absent from dispatch causes an immediate
-// LoopError wrapping ErrMissingTool.
+// tools is the Toolset advertised to the model on every call. A tool name that
+// appears in a model response but is absent from the toolset's dispatch map
+// causes an immediate LoopError wrapping ErrMissingTool.
 // maxIter caps the total number of API calls; 0 means no limit.
+//
+// The Toolset is read once: its Tools() and Dispatch() are computed at the
+// start of the loop. Mutating the underlying Bindings during the loop has
+// no effect on iterations already in flight.
 func (c *Client) Loop(
 	ctx context.Context,
 	system string,
 	history []Message,
-	tools []Tool,
-	dispatch map[string]ToolFunc,
+	tools Toolset,
 	maxIter int,
 ) (LoopResult, error) {
+	toolDefs := tools.Tools()
+	dispatch := tools.Dispatch()
 	msgs := make([]Message, len(history))
 	copy(msgs, history)
 	var total Usage
@@ -127,7 +146,7 @@ func (c *Client) Loop(
 			MaxTokens: c.cfg.MaxTokens,
 			System:    system,
 			Messages:  msgs,
-			Tools:     tools,
+			Tools:     toolDefs,
 		}
 		resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
 			return c.cfg.Provider.Call(ctx, req)
@@ -183,8 +202,7 @@ func (c *Client) LoopStream(
 	ctx context.Context,
 	system string,
 	history []Message,
-	tools []Tool,
-	dispatch map[string]ToolFunc,
+	tools Toolset,
 	maxIter int,
 	onToken func(ContentBlock),
 	onToolResult func([]ToolResult),
@@ -195,6 +213,8 @@ func (c *Client) LoopStream(
 	if onToolResult == nil {
 		onToolResult = func([]ToolResult) {}
 	}
+	toolDefs := tools.Tools()
+	dispatch := tools.Dispatch()
 	msgs := make([]Message, len(history))
 	copy(msgs, history)
 	var total Usage
@@ -205,7 +225,7 @@ func (c *Client) LoopStream(
 			MaxTokens: c.cfg.MaxTokens,
 			System:    system,
 			Messages:  msgs,
-			Tools:     tools,
+			Tools:     toolDefs,
 		}
 		resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
 			return c.cfg.Provider.Stream(ctx, req, onToken)
@@ -254,9 +274,12 @@ func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]T
 	uses := extractToolUses(content)
 
 	// Validate all names up front so a missing tool aborts immediately rather
-	// than after other calls have already started.
+	// than after other calls have already started. A nil func is treated as
+	// missing — advertising a tool without an implementation is a programmer
+	// error, not a runtime condition the model should see.
 	for _, use := range uses {
-		if _, ok := dispatch[use.Name]; !ok {
+		fn, ok := dispatch[use.Name]
+		if !ok || fn == nil {
 			return nil, &ToolError{ToolName: use.Name, ToolUseID: use.ID, Cause: ErrMissingTool}
 		}
 	}

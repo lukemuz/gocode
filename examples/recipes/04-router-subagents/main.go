@@ -62,10 +62,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	researchTools, err := agent.Join(clock.New().Toolset(), ws.Toolset())
-	if err != nil {
-		log.Fatal(err)
-	}
+	researchTools := agent.MustJoin(clock.New().Toolset(), ws.Toolset())
 
 	researchTool, researchFn, err := subagentTool(
 		"research",
@@ -119,8 +116,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	final := result.Messages[len(result.Messages)-1]
-	fmt.Println(agent.TextContent(final))
+	fmt.Println(result.FinalText())
 	fmt.Fprintf(os.Stderr, "\norchestrator tokens: %d in, %d out\n",
 		result.Usage.InputTokens, result.Usage.OutputTokens)
 }
@@ -153,7 +149,7 @@ func subagentTool(
 				ctx,
 				system,
 				[]agent.Message{agent.NewUserMessage(in.Task)},
-				tools.Tools(), tools.Dispatch(),
+				tools,
 				maxIter,
 			)
 			if err != nil {
@@ -161,8 +157,7 @@ func subagentTool(
 				// parent's tool result is still informative on failure.
 				return summarizeOnError(result), fmt.Errorf("subagent %q: %w", name, err)
 			}
-			last := result.Messages[len(result.Messages)-1]
-			text := agent.TextContent(last)
+			text := result.FinalText()
 			if text == "" {
 				return "", fmt.Errorf("subagent %q returned no text", name)
 			}
