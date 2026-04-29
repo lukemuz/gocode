@@ -103,71 +103,50 @@ Events for the entire trajectory live in one session.
 ### `gocode` shape
 
 In `gocode`, a subagent is a `ToolFunc` that happens to call `Loop`. The
-parent's dispatch map *is* the routing mechanism.
+parent's dispatch map *is* the routing mechanism. Sketch:
 
 ```go
-// Build a researcher subagent and expose it as a tool.
-researchTool, researchFn, _ := agent.NewTypedTool(
-    "research",
-    "Delegate a research task to a specialist with web tools.",
-    agent.Object(
-        agent.String("task", "What to research", agent.Required()),
-    ),
-    func(ctx context.Context, in struct{ Task string `json:"task"` }) (string, error) {
-        result, err := client.Loop(ctx,
-            "You are a research specialist. Be thorough.",
+// A subagent is just a tool whose body runs its own Loop.
+researchTool, researchFn, _ := agent.NewTypedTool[input](
+    "research", "Delegate a research task.", schema,
+    func(ctx context.Context, in input) (string, error) {
+        r, err := cheap.Loop(ctx, researchSystem,
             []agent.Message{agent.NewUserMessage(in.Task)},
-            researchTools.Tools(), researchTools.Dispatch(), 8,
-        )
-        if err != nil {
-            return "", err
-        }
-        return agent.TextContent(result.Messages[len(result.Messages)-1]), nil
+            researchTools, 8)
+        return r.FinalText(), err
     },
 )
 
-// Build a writer subagent the same way (omitted).
-
 orchestrator := agent.Assistant{
-    Client: client,
-    System: "Route research tasks to research, drafting to write.",
-    Tools: agent.Toolset{Bindings: []agent.ToolBinding{
+    Client: smart, // different model from the specialists
+    System: "Route research to research, drafting to write.",
+    Tools:  agent.Toolset{Bindings: []agent.ToolBinding{
         {Tool: researchTool, Func: researchFn},
         {Tool: writeTool,    Func: writeFn},
     }},
-    MaxIter: 10,
+    MaxIter: 6,
 }
-
 result, err := orchestrator.Step(ctx, history)
 ```
 
-What's happening: the orchestrator's LLM emits a `tool_use` for `research`,
-the dispatch map runs the function, the function spins up its own `Loop` with
-its own tools and prompt, and the result string is returned to the
-orchestrator as a tool result. Recursion just works; parallel sub-agent calls
-in one turn run concurrently because `runTools` already does that.
+The orchestrator's LLM emits a `tool_use` for `research`; the dispatch map
+runs the function; the function runs its own `Loop` with its own tools and
+prompt; the result string returns to the orchestrator as a tool result.
+Recursion is automatic. Parallel subagent calls in one turn run concurrently
+because `runTools` already does that.
 
 ### What you give up vs what you get
 
-You give up:
+You give up **cross-agent shared state**: each subagent sees only its task
+input, and shared state must be passed through the input schema explicitly.
 
-- **Cross-agent shared state.** Each subagent sees only its task input.
-  When you need shared state, you pass it explicitly through the input schema.
-- **A single unified event log spanning parent and child.** The parent sees
-  the subagent's output, not its intermediate steps. (When the events
-  `Recorder` lands, you'll be able to wire one across both, but explicitly.)
+You get **token efficiency** (the subagent's N tool calls collapse to one
+tool result in the parent's history), **different models per role**
+(orchestrator on a smarter `*Client`, specialists on `client.WithModel(...)`),
+**recursion and parallelism without new APIs**, and **no new vocabulary** —
+"subagent" is a word, not a type.
 
-You get:
-
-- **Token efficiency.** The subagent's 30 tool calls collapse into one tool
-  result in the parent's history. The parent's context stays clean.
-- **Recursion and parallelism for free.** No new APIs.
-- **Different models per role.** The orchestrator can use a smarter, more
-  expensive model; the subagents can use a cheaper one. This is the same
-  pattern as `client` vs `cheaperClient` — just two `*Client` values.
-- **No new vocabulary.** "Subagent" is a word, not a type. Nothing new to learn.
-
-A working version of this pattern lives in
+A working end-to-end version lives in
 [`examples/recipes/04-router-subagents`](examples/recipes/04-router-subagents).
 
 ## Worked comparison: persistent chat
@@ -220,101 +199,63 @@ mutation point stays inside the runner.
 
 ### `gocode` shape
 
-In `gocode`, a session is plain data and persistence is a four-line
-read-modify-write around `Assistant.Step`.
+In `gocode`, a session is plain data, persistence is a five-method `Store`
+interface, and intra-turn activity is captured by an optional `Recorder`.
+The whole turn is read-modify-write:
 
 ```go
-// Pick any Store. FileStore is in core; a Postgres or Redis Store is ~80
-// lines because the interface has five methods.
 store, _ := agent.NewFileStore("./sessions")
 
-assistant := agent.Assistant{
-    Client:  client,
-    System:  "You are a helpful support agent.",
-    MaxIter: 8,
+sess, _ := agent.Load(ctx, store, sessionID) // open-or-create
+client, _ := agent.New(agent.Config{
+    Provider: provider, Model: agent.ModelHaiku,
+    Recorder: agent.RecorderToSession(sess), // appends to sess.Events
+})
+assistant := agent.Assistant{Client: client, System: "...", MaxIter: 8}
+
+sess.History = append(sess.History, agent.NewUserMessage(userInput))
+result, err := assistant.Step(ctx, sess.History)
+if err != nil {
+    return err // sess is unchanged; retry is just calling again
 }
-
-func handleTurn(ctx context.Context, sessionID, userInput string) (string, error) {
-    sess, err := agent.Load(ctx, store, sessionID) // open-or-create
-    if err != nil {
-        return "", err
-    }
-
-    // Caller-owned metadata. Survives JSON round-trips, no service mediation.
-    if _, err := agent.GetState[string](sess, "tier"); err != nil {
-        _ = agent.SetState(sess, "tier", "pro")
-    }
-
-    sess.History = append(sess.History, agent.NewUserMessage(userInput))
-
-    result, err := assistant.Step(ctx, sess.History)
-    if err != nil {
-        return "", err // sess is unchanged; retry is just calling again
-    }
-    sess.History = result.Messages
-
-    if err := agent.Save(ctx, store, sess); err != nil {
-        return "", err
-    }
-    return agent.TextContent(sess.History[len(sess.History)-1]), nil
-}
+sess.History = result.Messages
+agent.Save(ctx, store, sess) // History + Events persist together
 ```
 
-What's happening: `Load` returns a `*Session{ID, History, State}` or a fresh
-one for first use. You append a user message, hand `History` to `Step`, take
-the returned slice back, and `Save`. The store sees a deep copy on the way in
-and out, so neither your in-memory pointer nor the stored copy can alias.
-Errors leave the session untouched, which makes "retry the turn" mean exactly
-what it says.
+`Session` is `{ID, History, State, Events}`. `Load` returns a fresh session
+on first use. `Save` is `Update`-or-`Create`. The store sees a deep copy
+both ways, so the stored and in-memory copies never alias. Errors leave
+`sess` untouched — "retry the turn" means exactly what it says.
 
-To swap backends, write a `Store`. The interface is `Create`, `Get`,
-`Update`, `Delete`, `List` — five methods, no callbacks, no event protocol.
-A Postgres-backed store is a thin wrapper over `pgx`; a Redis-backed store is
-a thin wrapper over `SET` and `GET`. Tests use `NewMemoryStore()` and need no
-fixtures.
+The `Recorder` interface has one method, `Record(ctx, Event)`. Built-in
+implementations (`MemoryRecorder`, `JSONLRecorder`, `MultiRecorder`,
+`RecorderToSession`) cover audit, file-tail, fan-out, and round-trip. Per-tool
+input/output, retry attempts with computed backoff, and per-iteration model
+usage all show up as events.
+
+To swap backends, write a `Store` (`Create`, `Get`, `Update`, `Delete`,
+`List`). A Postgres-backed store is a thin wrapper over `pgx`; tests use
+`NewMemoryStore()` and need no fixtures.
 
 ### What you give up vs what you get
 
-You give up:
+You give up **built-in scope semantics for state** (ADK's `app:` / `user:` /
+`temp:` prefixes that route to different storage scopes — in `gocode` you
+keep per-session data in `Session.State` and per-user/app data in your
+existing application database) and a **managed Vertex session backend**.
 
-- **A streaming event log per session.** ADK's `SessionService` records every
-  event (model call, tool call, state delta) as it happens, so you can replay
-  a turn from the middle. `gocode` records the final `History`; if you want
-  intermediate events you wire a `Recorder` (planned) or log them yourself
-  inside tools.
-- **Built-in scope semantics for state.** ADK distinguishes `app:`, `user:`,
-  and `temp:` state prefixes that the service routes to different storage
-  scopes. In `gocode` you decide where each piece lives — usually by keeping
-  per-session data in `Session.State` and per-user/app data in your existing
-  application database, which you already have anyway.
-- **A managed VertexAI session backend.** If you want hosted session storage,
-  ADK has it; `gocode` does not.
-
-You get:
-
-- **No hidden mutation.** The session changes exactly when your code assigns
-  to it. There's no runner editing state behind a callback boundary, so
-  reasoning about "what's in this session right now" is a matter of reading
-  the function you're in.
-- **Trivial backend swap.** Five methods, no inheritance, no event schema.
-  The `Store` your tests use and the `Store` your prod uses are the same
-  shape.
-- **Failure atomicity by default.** A failed `Step` does not corrupt the
-  session because nothing was written. ADK can offer this too, but it's a
-  property of the service implementation; here it's a property of the code
-  you can see.
-- **Plain JSON on disk.** `FileStore` writes a `Session` as a single JSON
-  document. You can `cat`, `jq`, diff, or hand-edit a session. No migration
-  tool required to inspect what the agent thinks happened.
-- **Composability with the rest of your Go service.** `Session.State` is
-  `map[string]json.RawMessage`. The same value you put in with `SetState` is
-  the value your HTTP handler, your background worker, and your audit logger
-  see — no service in between.
+You get **no hidden mutation** (the session changes exactly where your code
+assigns to it), **trivial backend swap** (five-method interface, no event
+protocol), **failure atomicity by default** (nothing is written until `Save`,
+so a failed `Step` cannot corrupt the session), **plain JSON on disk** (one
+document per session, `cat` / `jq` / diff / hand-edit), and **composability
+with the rest of your Go service** — `Session.State` is
+`map[string]json.RawMessage`, and `Session.Events` is `[]Event`, both
+accessible to your HTTP handler, background worker, and audit logger
+without a service in between.
 
 A working version of this pattern lives in
-[`examples/recipes/05-persistent-chat`](examples/recipes/05-persistent-chat)
-*(planned)*. The primitives it uses — `Session`, `Store`, `FileStore`,
-`Load`, `Save`, `SetState`, `GetState` — are in core today.
+[`examples/recipes/05-persistent-chat`](examples/recipes/05-persistent-chat).
 
 ## Worked comparison: trajectory testing
 
@@ -330,7 +271,7 @@ point in a different domain. The three comparisons in this document each
 prove a distinct philosophical claim:
 
 1. *Subagents are tools* — router recipe (above)
-2. *You own the data* — persistent-chat recipe (planned)
+2. *You own the data* — persistent-chat recipe (above)
 3. *Testing is ordinary Go* — trajectory-testing helpers (planned)
 
 If a future feature opens up a fourth axis of meaningful difference, a
