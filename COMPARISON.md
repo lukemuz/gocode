@@ -83,10 +83,10 @@ researchTool, researchFn, _ := agent.NewTypedTool[input](
 orchestrator := agent.Agent{
     Client: smart, // smarter model than the specialists
     System: "Route research to research, drafting to write.",
-    Tools:  agent.Toolset{Bindings: []agent.ToolBinding{
-        {Tool: researchTool, Func: researchFn},
-        {Tool: writeTool,    Func: writeFn},
-    }},
+    Tools: agent.Tools(
+        agent.Bind(researchTool, researchFn),
+        agent.Bind(writeTool, writeFn),
+    ),
     MaxIter: 6,
 }
 result, err := orchestrator.Step(ctx, history)

@@ -117,10 +117,13 @@ tool, fn, err := agent.NewTypedTool(
 )
 ~~~
 
-Tools compile down to ordinary values. A `Toolset` is an ordered slice of `ToolBinding{Tool, Func, Meta}` you can build literally:
+Tools compile down to ordinary values. A `Toolset` is an ordered slice of `ToolBinding{Tool, Func, Meta}`. `agent.Tools(...)` and `agent.Bind(tool, fn)` are variadic constructors for the common case:
 
 ~~~go
-tools := agent.Toolset{Bindings: []agent.ToolBinding{{Tool: tool, Func: fn}}}
+tools := agent.Tools(
+    agent.Bind(tool, fn),
+    agent.Bind(other, otherFn),
+)
 ~~~
 
 No hidden registry.
@@ -373,6 +376,7 @@ Larger runnable patterns in `examples/recipes/`:
 - `02-repo-explainer` — sandboxed workspace tools, streaming, file-backed sessions
 - `04-router-subagents` — orchestrator delegates to specialist subagents
 - `05-persistent-chat` — long-running conversation with `FileStore`
+- `06-parallel-pipeline` — parallel fan-out then sequential fan-in
 
 Set the relevant API key first.
 

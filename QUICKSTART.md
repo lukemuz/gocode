@@ -113,7 +113,7 @@ calc, calcFn, err := agent.NewTypedTool(
 Use it in a `Toolset`:
 
 ~~~go
-tools := agent.Toolset{Bindings: []agent.ToolBinding{{Tool: calc, Func: calcFn}}}
+tools := agent.Tools(agent.Bind(calc, calcFn))
 ~~~
 
 The model sees the schema; your handler receives a typed Go value; dispatch is a normal map. No reflection registry, no hidden runtime.

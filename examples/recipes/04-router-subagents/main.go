@@ -94,10 +94,10 @@ func main() {
 			"For factual questions about the codebase, call `research` first, then `write` to " +
 			"format the final answer. For pure writing tasks, skip `research`. " +
 			"Return only the final polished answer to the user.",
-		Tools: agent.Toolset{Bindings: []agent.ToolBinding{
-			{Tool: researchTool, Func: researchFn, Meta: agent.ToolMetadata{Source: "subagent/research"}},
-			{Tool: writeTool, Func: writeFn, Meta: agent.ToolMetadata{Source: "subagent/write"}},
-		}},
+		Tools: agent.Tools(
+			agent.ToolBinding{Tool: researchTool, Func: researchFn, Meta: agent.ToolMetadata{Source: "subagent/research"}},
+			agent.ToolBinding{Tool: writeTool, Func: writeFn, Meta: agent.ToolMetadata{Source: "subagent/write"}},
+		),
 		MaxIter: 6,
 	}
 
