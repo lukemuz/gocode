@@ -128,28 +128,17 @@ tools := agent.Tools(
 
 No hidden registry.
 
-## Three usage tiers
+## From one call to a tool loop
 
-### Tier 1: one model call
+### One model call
 
 ~~~go
 reply, usage, err := client.Ask(ctx, system, history)
 ~~~
 
-`usage` reports the input/output tokens for that call so cost-conscious code doesn't have to drop down to `Loop`.
+`usage` reports input/output tokens so cost-conscious code doesn't have to drop down to `Loop`.
 
-### Tier 2: parallel fan-out
-
-~~~go
-results := agent.Parallel(ctx,
-    func(ctx context.Context) (string, error) { return summarize(ctx, client, "Rome") },
-    func(ctx context.Context) (string, error) { return summarize(ctx, client, "Athens") },
-)
-~~~
-
-It uses goroutines. It is a helper, not a scheduler.
-
-### Tier 3: tool loop
+### Tool loop
 
 ~~~go
 result, err := client.Loop(ctx, system, history, tools, 5)
@@ -157,13 +146,13 @@ history = result.Messages
 fmt.Println(result.FinalText())
 ~~~
 
-`Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit. Multiple tool calls requested in one model turn run concurrently and return in original order.
+`Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit. Multiple tool calls in one model turn run concurrently and return in original order.
 
-Because `Ask`, `Loop`, and `Agent.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel, then synthesize their outputs with a later `Ask`.
+Because `Ask`, `Loop`, and `Agent.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel with `agent.Parallel`, then synthesize their outputs with a later `Ask`.
 
-### Tier 4: typed extraction
+### Typed extraction
 
-When you want a typed Go value back from the model — with or without intermediate tool use — `Extract` runs a loop in which the model is required to call a single "submit" tool whose typed argument is the return value:
+When you want a typed Go value back — with or without intermediate tool use — `Extract` runs a loop in which the model must call a single "submit" tool whose typed argument is the return value:
 
 ~~~go
 type Plan struct {
@@ -380,8 +369,4 @@ Larger runnable patterns in `examples/recipes/`:
 
 Set the relevant API key first.
 
-## Non-goals
-
-`gocode` will not become a graph executor, visual workflow builder, managed agent platform, no-code configurator, hidden scheduler, deployment framework, vector database, global tool registry, or cross-session memory platform in core. Higher-level systems can be built on top.
-
-See [`ROADMAP.md`](ROADMAP.md) for forward-looking work.
+See [`VISION.md`](VISION.md) for design philosophy and [`ROADMAP.md`](ROADMAP.md) for forward-looking work and what stays out of core.
