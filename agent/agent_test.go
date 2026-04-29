@@ -187,11 +187,7 @@ func TestNewTool(t *testing.T) {
 		Integer("b", ""),
 	)
 
-	tool, err := NewTool("test_tool", "A tool for testing", schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	tool := NewTool("test_tool", "A tool for testing", schema)
 	if tool.Name != "test_tool" || tool.Description != "A tool for testing" {
 		t.Errorf("metadata mismatch: %+v", tool)
 	}
@@ -315,7 +311,7 @@ func TestTypedToolFunc(t *testing.T) {
 			String("op", "", Required()),
 			Integer("val", "", Required()),
 		)
-		tool, fn2, err := NewTypedTool[input](
+		tool, fn2 := NewTypedTool[input](
 			"echo",
 			"echo a value",
 			schema,
@@ -326,9 +322,6 @@ func TestTypedToolFunc(t *testing.T) {
 				return fmt.Sprintf("echo:%d", in.Val), nil
 			},
 		)
-		if err != nil {
-			t.Fatal(err)
-		}
 		if tool.Name != "echo" || tool.Description != "echo a value" {
 			t.Errorf("bad tool metadata: %+v", tool)
 		}

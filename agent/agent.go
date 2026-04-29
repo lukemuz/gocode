@@ -175,6 +175,7 @@ func (c *Client) Loop(
 ) (LoopResult, error) {
 	toolDefs := tools.Tools()
 	dispatch := tools.Dispatch()
+	terminals := terminalSet(tools.Bindings)
 	msgs := make([]Message, len(history))
 	copy(msgs, history)
 	var total Usage
@@ -226,6 +227,10 @@ func (c *Client) Loop(
 				return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: iter, Cause: err}
 			}
 			msgs = append(msgs, NewToolResultMessage(results))
+			if terminatedByTool(resp.Content, results, terminals) {
+				emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnEnd, Usage: &total})
+				return LoopResult{Messages: msgs, Usage: total}, nil
+			}
 
 		case "max_tokens":
 			cause := fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens")
@@ -292,6 +297,7 @@ func (c *Client) LoopStream(
 	}
 	toolDefs := tools.Tools()
 	dispatch := tools.Dispatch()
+	terminals := terminalSet(tools.Bindings)
 	msgs := make([]Message, len(history))
 	copy(msgs, history)
 	var total Usage
@@ -344,6 +350,10 @@ func (c *Client) LoopStream(
 			}
 			onToolResult(results)
 			msgs = append(msgs, NewToolResultMessage(results))
+			if terminatedByTool(resp.Content, results, terminals) {
+				emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventTurnEnd, Usage: &total})
+				return LoopResult{Messages: msgs, Usage: total}, nil
+			}
 
 		case "max_tokens":
 			cause := fmt.Errorf("model hit max_tokens limit; increase Config.MaxTokens")
@@ -358,6 +368,43 @@ func (c *Client) LoopStream(
 	}
 	emit(ctx, rec, Event{TurnID: turnID, Iter: maxIter, Type: EventTurnError, Err: ErrMaxIter.Error()})
 	return LoopResult{Messages: msgs, Usage: total}, &LoopError{Iter: maxIter, Cause: ErrMaxIter}
+}
+
+// terminalSet collects names of bindings whose Meta.Terminal is set, so Loop
+// can recognise them after a tool batch runs. Returns nil if there are none
+// (the common case) so the per-iteration check is essentially free.
+func terminalSet(bindings []ToolBinding) map[string]bool {
+	var s map[string]bool
+	for _, b := range bindings {
+		if b.Meta.Terminal {
+			if s == nil {
+				s = make(map[string]bool)
+			}
+			s[b.Tool.Name] = true
+		}
+	}
+	return s
+}
+
+// terminatedByTool reports whether content contains a tool_use of a terminal
+// tool whose result was not an error. The IsError check matters: we don't
+// want a validator that rejected the model's submission to count as "done".
+func terminatedByTool(content []ContentBlock, results []ToolResult, terminals map[string]bool) bool {
+	if len(terminals) == 0 {
+		return false
+	}
+	okByID := make(map[string]bool, len(results))
+	for _, r := range results {
+		if !r.IsError {
+			okByID[r.ToolUseID] = true
+		}
+	}
+	for _, b := range content {
+		if b.Type == TypeToolUse && terminals[b.Name] && okByID[b.ID] {
+			return true
+		}
+	}
+	return false
 }
 
 // runTools executes all tool_use blocks in content concurrently and returns

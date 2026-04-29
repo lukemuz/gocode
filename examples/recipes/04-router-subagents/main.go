@@ -61,7 +61,7 @@ func main() {
 	}
 	researchTools := agent.MustJoin(clock.New().Toolset(), ws.Toolset())
 
-	researchTool, researchFn, err := subagentTool(
+	researchTool, researchFn := subagentTool(
 		"research",
 		"Delegate an investigation task. The researcher has read-only filesystem tools "+
 			"sandboxed to the project directory and a clock. Call this when the question "+
@@ -73,12 +73,9 @@ func main() {
 		researchTools,
 		8,
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Writer subagent: no tools.
-	writeTool, writeFn, err := subagentTool(
+	writeTool, writeFn := subagentTool(
 		"write",
 		"Delegate a writing task. The writer has no tools and turns research notes "+
 			"into a clear, well-structured answer for the user. Pass the user's original "+
@@ -89,9 +86,6 @@ func main() {
 		agent.Toolset{},
 		2,
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	orchestrator := agent.Assistant{
 		Client: smart,
@@ -131,7 +125,7 @@ func subagentTool(
 	system string,
 	tools agent.Toolset,
 	maxIter int,
-) (agent.Tool, agent.ToolFunc, error) {
+) (agent.Tool, agent.ToolFunc) {
 	type input struct {
 		Task string `json:"task"`
 	}
