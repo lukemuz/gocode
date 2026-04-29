@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -72,4 +73,58 @@ func TextContent(msg Message) string {
 		}
 	}
 	return b.String()
+}
+
+// RenderForSummary flattens a slice of messages into a plain-text transcript
+// suitable for passing to a summarizer model. Each message is rendered as
+// labeled lines (USER, ASSISTANT, ASSISTANT_TOOL_USE, TOOL_RESULT) that
+// preserve the structure without paying the full token cost of large tool
+// outputs: tool_use inputs and tool_result contents are abbreviated to
+// maxToolBytes characters with a "...[truncated]" marker. Pass 0 for
+// maxToolBytes to use the default of 400.
+//
+// This is the rendering most ContextManager.Summarizer implementations want.
+// If you need different formatting (different abbreviation thresholds, JSON
+// output, redaction), write your own — the message structures are public.
+func RenderForSummary(msgs []Message, maxToolBytes int) string {
+	if maxToolBytes <= 0 {
+		maxToolBytes = 400
+	}
+	var b strings.Builder
+	for _, m := range msgs {
+		switch m.Role {
+		case RoleUser:
+			text := TextContent(m)
+			if text != "" {
+				fmt.Fprintf(&b, "USER: %s\n", text)
+				continue
+			}
+			for _, c := range m.Content {
+				if c.Type == TypeToolResult {
+					tag := "TOOL_RESULT"
+					if c.IsError {
+						tag = "TOOL_ERROR"
+					}
+					fmt.Fprintf(&b, "%s (%s): %s\n", tag, c.ToolUseID, abbreviate(c.Content, maxToolBytes))
+				}
+			}
+		case RoleAssistant:
+			for _, c := range m.Content {
+				switch c.Type {
+				case TypeText:
+					fmt.Fprintf(&b, "ASSISTANT: %s\n", c.Text)
+				case TypeToolUse:
+					fmt.Fprintf(&b, "ASSISTANT_TOOL_USE: %s(%s)\n", c.Name, abbreviate(string(c.Input), maxToolBytes))
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
+func abbreviate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...[truncated]"
 }

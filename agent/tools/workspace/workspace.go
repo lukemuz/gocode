@@ -53,10 +53,10 @@ type Config struct {
 //	if err != nil { ... }
 //
 //	// Use the toolset directly:
-//	result, err := client.Loop(ctx, system, history, ws.Tools(), ws.Dispatch(), 10)
+//	result, err := client.Loop(ctx, system, history, ws.Toolset(), 10)
 //
 //	// Or compose with other toolsets:
-//	toolset, err := agent.Join(clockset, ws.Toolset())
+//	toolset := agent.MustJoin(clockset, ws.Toolset())
 type Workspace struct {
 	root         string
 	maxFileBytes int64
@@ -112,12 +112,15 @@ func (w *Workspace) Toolset() agent.Toolset {
 	return agent.Toolset{Bindings: w.bindings}
 }
 
-// Tools returns the []agent.Tool slice for passing directly to Client.Loop.
+// Tools returns the model-facing Tool slice. Most callers should use
+// Toolset() and pass it to Client.Loop directly; Tools() exists for
+// inspection and for callers building a custom loop on top of the
+// provider primitives.
 func (w *Workspace) Tools() []agent.Tool {
 	return w.Toolset().Tools()
 }
 
-// Dispatch returns the dispatch map for passing directly to Client.Loop.
+// Dispatch returns the name→func map. See Tools() for when to use this.
 func (w *Workspace) Dispatch() map[string]agent.ToolFunc {
 	return w.Toolset().Dispatch()
 }

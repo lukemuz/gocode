@@ -16,7 +16,7 @@ import (
 //	    KeepRecent: 10,  // always keep the last 10 messages
 //	}
 //	trimmed, err := cm.Trim(ctx, history)
-//	result, err  := client.Loop(ctx, system, trimmed, tools, dispatch, 10)
+//	result, err  := client.Loop(ctx, system, trimmed, tools, 10)
 type ContextManager struct {
 	// MaxTokens is the token budget. Trim returns history unchanged if it
 	// fits within this budget. Zero disables trimming entirely.

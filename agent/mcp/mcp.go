@@ -19,7 +19,7 @@
 //		log.Fatal(err)
 //	}
 //
-//	result, err := client.Loop(ctx, system, history, toolset.Tools(), toolset.Dispatch(), 10)
+//	result, err := client.Loop(ctx, system, history, toolset, 10)
 package mcp
 
 import (

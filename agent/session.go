@@ -119,6 +119,21 @@ func Save(ctx context.Context, store Store, s *Session) error {
 	return store.Create(ctx, s)
 }
 
+// Load returns the session with the given ID, or a fresh &Session{ID: id}
+// if no session with that ID exists. It is the read-side symmetry of Save:
+// callers that don't need to distinguish first use from subsequent use can
+// rely on it for the open-or-create pattern. Other errors are returned as-is.
+func Load(ctx context.Context, store Store, id string) (*Session, error) {
+	sess, err := store.Get(ctx, id)
+	if err == nil {
+		return sess, nil
+	}
+	if errors.Is(err, ErrSessionNotFound) {
+		return &Session{ID: id}, nil
+	}
+	return nil, err
+}
+
 // Sentinel errors for Store operations.
 var (
 	// ErrSessionNotFound is returned by Get, Update, and Delete when no

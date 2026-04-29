@@ -89,7 +89,7 @@ type Assistant struct {
 //	if err != nil {
 //	    return LoopResult{}, err
 //	}
-//	return a.Client.Loop(ctx, a.System, trimmed, a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter)
+//	return a.Client.Loop(ctx, a.System, trimmed, a.Tools, a.MaxIter)
 //
 // Drop to these primitives at any time without changing your data model.
 func (a Assistant) Step(ctx context.Context, history []Message) (LoopResult, error) {
@@ -110,8 +110,7 @@ func (a Assistant) Step(ctx context.Context, history []Message) (LoopResult, err
 		ctx,
 		a.System,
 		trimmed,
-		a.Tools.Tools(),
-		a.Tools.Dispatch(),
+		a.Tools,
 		a.MaxIter,
 	)
 
@@ -137,7 +136,7 @@ func (a Assistant) Step(ctx context.Context, history []Message) (LoopResult, err
 //	    return LoopResult{}, err
 //	}
 //	return a.Client.LoopStream(ctx, a.System, trimmed,
-//	    a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter, onToken, onToolResult)
+//	    a.Tools, a.MaxIter, onToken, onToolResult)
 //
 // Drop to these primitives at any time without changing your data model.
 func (a Assistant) StepStream(
@@ -169,8 +168,7 @@ func (a Assistant) StepStream(
 		ctx,
 		a.System,
 		trimmed,
-		a.Tools.Tools(),
-		a.Tools.Dispatch(),
+		a.Tools,
 		a.MaxIter,
 		onToken,
 		onToolResult,
