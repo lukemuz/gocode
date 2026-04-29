@@ -7,7 +7,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/lukemuz/gocode/agent"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/providers/anthropic"
 )
 
 type ListDirInput struct {
@@ -24,11 +25,11 @@ func main() {
 	// NewTypedTool + schema builders (Object/String/Required) provide
 	// both Tool and ToolFunc with minimal boilerplate. Schema helpers
 	// are now implemented (see ROADMAP.md).
-	listDirTool, listDirFn := agent.NewTypedTool[ListDirInput](
+	listDirTool, listDirFn := gocode.NewTypedTool[ListDirInput](
 		"list_dir",
 		"List the files in a directory.",
-		agent.Object(
-			agent.String("path", "Path to the directory", agent.Required()),
+		gocode.Object(
+			gocode.String("path", "Path to the directory", gocode.Required()),
 		),
 		func(_ context.Context, in ListDirInput) (string, error) {
 			entries, err := os.ReadDir(in.Path)
@@ -39,15 +40,15 @@ func main() {
 			for i, e := range entries {
 				names[i] = e.Name()
 			}
-			return agent.JSONResult(names)
+			return gocode.JSONResult(names)
 		},
 	)
 
-	readFileTool, readFileFn := agent.NewTypedTool[ReadFileInput](
+	readFileTool, readFileFn := gocode.NewTypedTool[ReadFileInput](
 		"read_file",
 		"Read the contents of a file.",
-		agent.Object(
-			agent.String("path", "Path to the file", agent.Required()),
+		gocode.Object(
+			gocode.String("path", "Path to the file", gocode.Required()),
 		),
 		func(_ context.Context, in ReadFileInput) (string, error) {
 			data, err := os.ReadFile(in.Path)
@@ -58,26 +59,26 @@ func main() {
 		},
 	)
 
-	tools := agent.Tools(
-		agent.Bind(listDirTool, listDirFn),
-		agent.Bind(readFileTool, readFileFn),
+	tools := gocode.Tools(
+		gocode.Bind(listDirTool, listDirFn),
+		gocode.Bind(readFileTool, readFileFn),
 	)
 
-	provider, err := agent.NewAnthropicProviderFromEnv()
+	provider, err := anthropic.NewProviderFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	client, err := agent.New(agent.Config{
+	client, err := gocode.New(gocode.Config{
 		Provider:  provider,
-		Model:     agent.ModelSonnet,
+		Model:     gocode.ModelSonnet,
 		MaxTokens: 2048,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	history := []agent.Message{
-		agent.NewUserMessage(
+	history := []gocode.Message{
+		gocode.NewUserMessage(
 			"List the files in the current directory, then read go.mod and tell me what Go version this project requires.",
 		),
 	}

@@ -5,7 +5,7 @@
 ## Install
 
 ~~~bash
-go get github.com/lukemuz/gocode/agent
+go get github.com/lukemuz/gocode
 export ANTHROPIC_API_KEY=sk-ant-...
 ~~~
 
@@ -21,19 +21,20 @@ import (
     "fmt"
     "log"
 
-    "github.com/lukemuz/gocode/agent"
+    "github.com/lukemuz/gocode"
+    "github.com/lukemuz/gocode/providers/anthropic"
 )
 
 func main() {
     ctx := context.Background()
 
-    client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+    client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
     if err != nil {
         log.Fatal(err)
     }
 
-    history := []agent.Message{
-        agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
+    history := []gocode.Message{
+        gocode.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
     }
 
     reply, usage, err := client.Ask(ctx, "You are concise.", history)
@@ -41,7 +42,7 @@ func main() {
         log.Fatal(err)
     }
 
-    fmt.Println(agent.TextContent(reply))
+    fmt.Println(gocode.TextContent(reply))
     fmt.Printf("(%d in / %d out tokens)\n", usage.InputTokens, usage.OutputTokens)
 }
 ~~~
@@ -54,24 +55,24 @@ func main() {
 
 ~~~go
 history = append(history, reply)
-history = append(history, agent.NewUserMessage("Pick the most practical idea."))
+history = append(history, gocode.NewUserMessage("Pick the most practical idea."))
 reply, _, err = client.Ask(ctx, "You are concise.", history)
 ~~~
 
-That is the core data model: `[]agent.Message` in, `agent.Message` out.
+That is the core data model: `[]gocode.Message` in, `gocode.Message` out.
 
 ## 3. Add a tool
 
 A tool is a model-facing definition plus a Go function. The built-in clock tool is the smallest example:
 
 ~~~go
-import "github.com/lukemuz/gocode/agent/tools/clock"
+import "github.com/lukemuz/gocode/tools/clock"
 
 clockTool := clock.New()
 toolset := clockTool.Toolset()
 
-history := []agent.Message{
-    agent.NewUserMessage("What time is it? Then suggest one thing to work on next."),
+history := []gocode.Message{
+    gocode.NewUserMessage("What time is it? Then suggest one thing to work on next."),
 }
 
 result, err := client.Loop(ctx, "Use tools when they help.", history, toolset, 5)
@@ -92,13 +93,13 @@ type CalculatorInput struct {
     B         float64 `json:"b"`
 }
 
-calc, calcFn := agent.NewTypedTool(
+calc, calcFn := gocode.NewTypedTool(
     "calculator",
     "Do basic arithmetic.",
-    agent.Object(
-        agent.String("operation", "add, subtract, multiply", agent.Required(), agent.Enum("add", "subtract", "multiply")),
-        agent.Number("a", "First number", agent.Required()),
-        agent.Number("b", "Second number", agent.Required()),
+    gocode.Object(
+        gocode.String("operation", "add, subtract, multiply", gocode.Required(), gocode.Enum("add", "subtract", "multiply")),
+        gocode.Number("a", "First number", gocode.Required()),
+        gocode.Number("b", "Second number", gocode.Required()),
     ),
     func(ctx context.Context, in CalculatorInput) (string, error) {
         switch in.Operation {
@@ -114,24 +115,24 @@ calc, calcFn := agent.NewTypedTool(
 Use it in a `Toolset`:
 
 ~~~go
-tools := agent.Tools(agent.Bind(calc, calcFn))
+tools := gocode.Tools(gocode.Bind(calc, calcFn))
 ~~~
 
 The model sees the schema; your handler receives a typed Go value; dispatch is a normal map. No reflection registry, no hidden runtime.
 
 ### Arrays and nested objects
 
-Use `agent.Array` for list parameters and `agent.ObjectOf` for nested object shapes:
+Use `gocode.Array` for list parameters and `gocode.ObjectOf` for nested object shapes:
 
 ~~~go
-schema := agent.Object(
-    agent.String("reasoning", "Why these subtasks cover the question"),
-    agent.Array("subtasks", "List of sub-questions",
-        agent.ObjectOf(
-            agent.String("question", "Sub-question to research", agent.Required()),
-            agent.String("rationale", "Why this matters"),
+schema := gocode.Object(
+    gocode.String("reasoning", "Why these subtasks cover the question"),
+    gocode.Array("subtasks", "List of sub-questions",
+        gocode.ObjectOf(
+            gocode.String("question", "Sub-question to research", gocode.Required()),
+            gocode.String("rationale", "Why this matters"),
         ),
-        agent.Required()),
+        gocode.Required()),
 )
 ~~~
 
@@ -139,7 +140,7 @@ schema := agent.Object(
 
 ### Hand-rolled schemas (escape hatch)
 
-The builders cover ~95% of tool schemas. For the rest — `oneOf`, `$ref`, regex `pattern`, recursive types — `agent.Tool.InputSchema` is `json.RawMessage`, so any valid JSON Schema works:
+The builders cover ~95% of tool schemas. For the rest — `oneOf`, `$ref`, regex `pattern`, recursive types — `gocode.Tool.InputSchema` is `json.RawMessage`, so any valid JSON Schema works:
 
 ~~~go
 const mySchema = `{
@@ -150,14 +151,14 @@ const mySchema = `{
   "required": ["value"]
 }`
 
-tool := agent.Tool{
+tool := gocode.Tool{
     Name:        "store",
     Description: "Store a string or number",
     InputSchema: json.RawMessage(mySchema),
 }
 ~~~
 
-You can mix this with `agent.TypedToolFunc` for the dispatch side; only the schema needs to be hand-rolled.
+You can mix this with `gocode.TypedToolFunc` for the dispatch side; only the schema needs to be hand-rolled.
 
 ## 5. Compose built-ins and middleware
 
@@ -167,29 +168,29 @@ if err != nil {
     log.Fatal(err)
 }
 
-tools := agent.MustJoin(clockTool.Toolset(), ws.Toolset()).Wrap(
-    agent.WithTimeout(5*time.Second),
-    agent.WithResultLimit(20_000),
+tools := gocode.MustJoin(clockTool.Toolset(), ws.Toolset()).Wrap(
+    gocode.WithTimeout(5*time.Second),
+    gocode.WithResultLimit(20_000),
 )
 ~~~
 
-Use `workspace.NewReadOnly` for safe filesystem reads. `workspace.New` includes `edit_file` — wrap it with `agent.WithConfirmation` before letting writes run.
+Use `workspace.NewReadOnly` for safe filesystem reads. `workspace.New` includes `edit_file` — wrap it with `gocode.WithConfirmation` before letting writes run.
 
 ## 6. Use Agent when the glue repeats
 
 `Agent` bundles a client, system prompt, toolset, context manager, and iteration cap.
 
 ~~~go
-a := agent.Agent{
+a := gocode.Agent{
     Client:  client,
     System:  "You are a helpful assistant.",
     Tools:   tools,
-    Context: agent.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+    Context: gocode.ContextManager{MaxTokens: 8000, KeepRecent: 20},
     MaxIter: 10,
 }
 
 // One-shot autonomous task: pass a single user message with the goal.
-result, err := a.Step(ctx, []agent.Message{agent.NewUserMessage("do the thing")})
+result, err := a.Step(ctx, []gocode.Message{gocode.NewUserMessage("do the thing")})
 
 // Multi-turn: call Step once per human turn and thread history.
 result, err = a.Step(ctx, history)

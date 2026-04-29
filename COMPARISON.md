@@ -70,22 +70,22 @@ events = runner.run(session_id=session.id, new_message=...)
 **`gocode` shape.** A subagent is a `ToolFunc` that happens to call `Loop`. The parent's dispatch map *is* the routing mechanism.
 
 ```go
-researchTool, researchFn := agent.NewTypedTool[input](
+researchTool, researchFn := gocode.NewTypedTool[input](
     "research", "Delegate a research task.", schema,
     func(ctx context.Context, in input) (string, error) {
         r, err := cheap.Loop(ctx, researchSystem,
-            []agent.Message{agent.NewUserMessage(in.Task)},
+            []gocode.Message{gocode.NewUserMessage(in.Task)},
             researchTools, 8)
         return r.FinalText(), err
     },
 )
 
-orchestrator := agent.Agent{
+orchestrator := gocode.Agent{
     Client: smart, // smarter model than the specialists
     System: "Route research to research, drafting to write.",
-    Tools: agent.Tools(
-        agent.Bind(researchTool, researchFn),
-        agent.Bind(writeTool, writeFn),
+    Tools: gocode.Tools(
+        gocode.Bind(researchTool, researchFn),
+        gocode.Bind(writeTool, writeFn),
     ),
     MaxIter: 6,
 }
@@ -116,14 +116,14 @@ for event in runner.run(user_id="u-123", session_id="s-abc",
 **`gocode` shape.** A session is plain data; persistence is a five-method `Store`; the whole turn is read-modify-write.
 
 ```go
-store, _ := agent.NewFileStore("./sessions")
+store, _ := stores.NewFileStore("./sessions")
 
 sess, err := store.Get(ctx, sessionID)
-if errors.Is(err, agent.ErrSessionNotFound) {
-    sess = &agent.Session{ID: sessionID}
+if errors.Is(err, gocode.ErrSessionNotFound) {
+    sess = &gocode.Session{ID: sessionID}
 }
 
-sess.History = append(sess.History, agent.NewUserMessage(userInput))
+sess.History = append(sess.History, gocode.NewUserMessage(userInput))
 result, err := assistant.Step(ctx, sess.History)
 if err != nil {
     return err // sess unchanged; retry is just calling again
@@ -167,7 +167,7 @@ runner   = Runner(agent=pipeline, session_service=...)
 **`gocode` shape.** Fan-out is a goroutine helper; fan-in is a function call. The data flow is local variables, top to bottom.
 
 ```go
-results := agent.Parallel(ctx,
+results := gocode.Parallel(ctx,
     func(ctx context.Context) (string, error) {
         return ask(ctx, client, "Summarize the rise of the Roman Empire ...")
     },

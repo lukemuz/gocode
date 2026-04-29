@@ -7,19 +7,19 @@ interface, and a `Recorder` captures intermediate turn activity into
 
 ## What this shows
 
-- **Open-or-create** with `agent.Load` — first call creates, later calls load.
+- **Open-or-create** with `gocode.Load` — first call creates, later calls load.
 - **Read-modify-write** turn loop:
   ```go
-  sess.History = append(sess.History, agent.NewUserMessage(input))
+  sess.History = append(sess.History, gocode.NewUserMessage(input))
   result, err := assistant.Step(ctx, sess.History)
   // failed turn → sess.History unchanged → next attempt starts from the same place
   sess.History = result.Messages
-  agent.Save(ctx, store, sess)
+  gocode.Save(ctx, store, sess)
   ```
 - **`FileStore`** as one Store implementation; the same code works against
   `NewMemoryStore()` for tests and would work against a Postgres or Redis
   store you write yourself in ~80 lines.
-- **`agent.RecorderToSession(sess)`** — a `Recorder` that appends every
+- **`gocode.RecorderToSession(sess)`** — a `Recorder` that appends every
   model request/response, retry, and tool call to `sess.Events`. After
   `Save`, the full intra-turn activity log is on disk next to `History`.
 - **`-dump`** flag formats the recorded events into a per-turn timeline so
@@ -40,11 +40,11 @@ document you can `cat`, `jq`, diff, or hand-edit.
 
 ## Library features exercised
 
-- `agent.Session`, `agent.Store`, `agent.FileStore`
-- `agent.Load`, `agent.Save` (open-or-create / upsert convenience)
-- `agent.Recorder` interface + `agent.RecorderToSession`
-- `agent.Event` and the `EventType` constants
-- `agent.Agent` driving the turn
+- `gocode.Session`, `gocode.Store`, `gocode.FileStore`
+- `gocode.Load`, `gocode.Save` (open-or-create / upsert convenience)
+- `gocode.Recorder` interface + `gocode.RecorderToSession`
+- `gocode.Event` and the `EventType` constants
+- `gocode.Agent` driving the turn
 - Built-in tools: `agent/tools/math`
 
 ## ADK comparison

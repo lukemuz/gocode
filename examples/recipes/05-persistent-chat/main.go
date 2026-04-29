@@ -26,8 +26,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukemuz/gocode/agent"
-	"github.com/lukemuz/gocode/agent/tools/math"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/stores"
+	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/gocode/tools/math"
 )
 
 func main() {
@@ -38,13 +40,13 @@ func main() {
 
 	ctx := context.Background()
 
-	store, err := agent.NewFileStore(*dir)
+	store, err := stores.NewFileStore(*dir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Open-or-create. Errors other than "not found" are fatal.
-	sess, err := agent.Load(ctx, store, *id)
+	sess, err := gocode.Load(ctx, store, *id)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -59,25 +61,25 @@ func main() {
 		log.Fatal("usage: persistent-chat [-id ID] [-dir PATH] \"your message\"   |   -dump")
 	}
 
-	provider, err := agent.NewAnthropicProviderFromEnv()
+	provider, err := anthropic.NewProviderFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// A Recorder that appends to sess.Events. After Save, the full activity
 	// log of this turn is on disk alongside History.
-	rec := agent.RecorderToSession(sess)
+	rec := gocode.RecorderToSession(sess)
 
-	client, err := agent.New(agent.Config{
+	client, err := gocode.New(gocode.Config{
 		Provider: provider,
-		Model:    agent.ModelHaiku,
+		Model:    gocode.ModelHaiku,
 		Recorder: rec,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	a := agent.Agent{
+	a := gocode.Agent{
 		Client:  client,
 		System:  "You are a helpful assistant. Use the calculator tool when arithmetic is needed.",
 		Tools:   math.New().Toolset(),
@@ -87,14 +89,14 @@ func main() {
 	// Read-modify-write. The session is unchanged until Step returns
 	// successfully — a failed turn means the next attempt starts from the
 	// same state.
-	sess.History = append(sess.History, agent.NewUserMessage(user))
+	sess.History = append(sess.History, gocode.NewUserMessage(user))
 	result, err := a.Step(ctx, sess.History)
 	if err != nil {
 		log.Fatalf("turn failed: %v", err)
 	}
 	sess.History = result.Messages
 
-	if err := agent.Save(ctx, store, sess); err != nil {
+	if err := gocode.Save(ctx, store, sess); err != nil {
 		log.Fatal(err)
 	}
 
@@ -106,27 +108,27 @@ func main() {
 }
 
 // dumpEvents prints sess.Events in a compact, human-friendly form.
-func dumpEvents(sess *agent.Session) {
+func dumpEvents(sess *gocode.Session) {
 	if len(sess.Events) == 0 {
 		fmt.Println("(no events recorded)")
 		return
 	}
 	for _, ev := range sess.Events {
 		switch ev.Type {
-		case agent.EventTurnStart:
+		case gocode.EventTurnStart:
 			fmt.Printf("[%4d] turn=%s start (history=%d msgs)\n", ev.Seq, ev.TurnID, len(ev.History))
-		case agent.EventModelRequest:
+		case gocode.EventModelRequest:
 			fmt.Printf("[%4d] turn=%s iter=%d → model request\n", ev.Seq, ev.TurnID, ev.Iter)
-		case agent.EventModelResponse:
+		case gocode.EventModelResponse:
 			fmt.Printf("[%4d] turn=%s iter=%d ← model response stop=%s in=%d out=%d\n",
 				ev.Seq, ev.TurnID, ev.Iter, ev.StopReason, ev.Usage.InputTokens, ev.Usage.OutputTokens)
-		case agent.EventRetryAttempt:
+		case gocode.EventRetryAttempt:
 			fmt.Printf("[%4d] turn=%s iter=%d retry attempt=%d wait=%s\n",
 				ev.Seq, ev.TurnID, ev.Iter, ev.Attempt, ev.Wait)
-		case agent.EventToolCallStart:
+		case gocode.EventToolCallStart:
 			fmt.Printf("[%4d] turn=%s iter=%d → tool %s(%s)\n",
 				ev.Seq, ev.TurnID, ev.Iter, ev.ToolName, compactJSON(ev.ToolInput))
-		case agent.EventToolCallEnd:
+		case gocode.EventToolCallEnd:
 			if ev.IsError {
 				fmt.Printf("[%4d] turn=%s iter=%d ← tool %s ERROR: %s\n",
 					ev.Seq, ev.TurnID, ev.Iter, ev.ToolName, ev.ToolError)
@@ -134,10 +136,10 @@ func dumpEvents(sess *agent.Session) {
 				fmt.Printf("[%4d] turn=%s iter=%d ← tool %s = %s\n",
 					ev.Seq, ev.TurnID, ev.Iter, ev.ToolName, truncate(ev.ToolOutput, 80))
 			}
-		case agent.EventTurnEnd:
+		case gocode.EventTurnEnd:
 			fmt.Printf("[%4d] turn=%s end (in=%d out=%d)\n",
 				ev.Seq, ev.TurnID, ev.Usage.InputTokens, ev.Usage.OutputTokens)
-		case agent.EventTurnError:
+		case gocode.EventTurnError:
 			fmt.Printf("[%4d] turn=%s ERROR: %s\n", ev.Seq, ev.TurnID, ev.Err)
 		}
 	}
@@ -145,9 +147,9 @@ func dumpEvents(sess *agent.Session) {
 
 // recentEventCount returns the number of events in the most recent turn,
 // found by counting back from the last TurnStart.
-func recentEventCount(sess *agent.Session) int {
+func recentEventCount(sess *gocode.Session) int {
 	for i := len(sess.Events) - 1; i >= 0; i-- {
-		if sess.Events[i].Type == agent.EventTurnStart {
+		if sess.Events[i].Type == gocode.EventTurnStart {
 			return len(sess.Events) - i
 		}
 	}
