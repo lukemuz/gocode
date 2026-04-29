@@ -26,7 +26,7 @@ go run ./examples/recipes/04-router-subagents -dir . "What does this project do,
 ## Library features exercised
 
 - `agent.New`, `agent.Config`, `agent.Client`
-- `agent.Assistant` (the blessed middle path)
+- `agent.Agent` (the blessed middle path)
 - `agent.NewTypedTool` with a `{task: string}` schema
 - `agent.Join` to compose toolsets
 - `agent.Toolset` with `ToolMetadata.Source` annotations

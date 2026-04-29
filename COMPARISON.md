@@ -6,7 +6,7 @@ A code-first comparison between `gocode` and Google's Agent Development Kit (ADK
 
 ADK is a full agent application model: agents, runners, sessions, state, events, callbacks, artifact services, memory services, and managed deployment. It is comprehensive and opinionated.
 
-`gocode` is a small set of primitives — `Client`, `Provider`, `Message`, `Tool`, `Loop`, `Assistant`, `Toolset`, `ContextManager`, `Session` — composed with ordinary Go.
+`gocode` is a small set of primitives — `Client`, `Provider`, `Message`, `Tool`, `Loop`, `Agent`, `Toolset`, `ContextManager`, `Session` — composed with ordinary Go.
 
 | Concern | ADK | `gocode` |
 |---|---|---|
@@ -80,7 +80,7 @@ researchTool, researchFn, _ := agent.NewTypedTool[input](
     },
 )
 
-orchestrator := agent.Assistant{
+orchestrator := agent.Agent{
     Client: smart, // smarter model than the specialists
     System: "Route research to research, drafting to write.",
     Tools:  agent.Toolset{Bindings: []agent.ToolBinding{

@@ -16,7 +16,7 @@ Future work should make the common path shorter without introducing hidden model
 - **Observability hooks.** Expand `Hooks` toward request/response/tool/error events, plus an `agent/otel` subpackage so the core stays free of OpenTelemetry.
 - **Extended generation controls.** Thread temperature, top-p, and stop sequences through `ProviderRequest`. Zero values keep provider defaults.
 - **Testing helpers.** Tiny mock and scripted providers, plus assertions for history shape, tool calls, and usage. The `Provider` interface stays the main testing seam.
-- **HTTP/SSE example.** A `net/http` handler that loads history, calls `Assistant.StepStream`, writes SSE events, and saves. No web framework, no runner.
+- **HTTP/SSE example.** A `net/http` handler that loads history, calls `Agent.StepStream`, writes SSE events, and saves. No web framework, no runner.
 - **Evaluation helpers.** Small offline regression helpers. No hosted dashboards, no required databases.
 
 ## Maybe, maybe not

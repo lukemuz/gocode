@@ -77,7 +77,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	assistant := agent.Assistant{
+	a := agent.Agent{
 		Client:  client,
 		System:  "You are a helpful assistant. Use the calculator tool when arithmetic is needed.",
 		Tools:   math.New().Toolset(),
@@ -88,7 +88,7 @@ func main() {
 	// successfully — a failed turn means the next attempt starts from the
 	// same state.
 	sess.History = append(sess.History, agent.NewUserMessage(user))
-	result, err := assistant.Step(ctx, sess.History)
+	result, err := a.Step(ctx, sess.History)
 	if err != nil {
 		log.Fatalf("turn failed: %v", err)
 	}

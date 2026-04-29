@@ -15,7 +15,7 @@ It gives you:
 - `Extract[T]` for typed structured output (with or without intermediate tool use)
 - plain `[]Message` history and normal Go functions as tools
 - providers for Anthropic, OpenAI, and OpenRouter
-- typed tools, schema helpers, toolsets, middleware, context management, MCP, and a thin `Assistant` block
+- typed tools, schema helpers, toolsets, middleware, context management, MCP, and a thin `Agent` block
 - safe built-in tools (clock, math, sandboxed workspace)
 - session persistence with a five-method `Store` interface
 - retries, typed errors, streaming, usage tracking
@@ -156,7 +156,7 @@ fmt.Println(result.FinalText())
 
 `Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit. Multiple tool calls requested in one model turn run concurrently and return in original order.
 
-Because `Ask`, `Loop`, and `Assistant.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel, then synthesize their outputs with a later `Ask`.
+Because `Ask`, `Loop`, and `Agent.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel, then synthesize their outputs with a later `Ask`.
 
 ### Tier 4: typed extraction
 
@@ -210,22 +210,27 @@ trimmed, err := cm.Trim(ctx, history)
 
 The original history is not mutated. Tool-use/tool-result integrity is preserved. Summarization happens only if you configure a summarizer.
 
-### Assistant
+### Agent
 
-`Assistant` is the blessed middle path: a thin block over a client, prompt, toolset, context manager, iteration limit, and hooks.
+`Agent` is the blessed middle path: a thin block over a client, prompt, toolset, context manager, iteration limit, and hooks.
 
 ~~~go
-a := agent.Assistant{
+a := agent.Agent{
     Client:  client,
     System:  "You are a helpful assistant.",
     Tools:   toolset,
     Context: agent.ContextManager{MaxTokens: 8000, KeepRecent: 20},
     MaxIter: 10,
 }
-result, err := a.Step(ctx, history)
+
+// One-shot autonomous task: pass the goal as a single user message.
+result, err := a.Step(ctx, []agent.Message{agent.NewUserMessage("do the thing")})
+
+// Multi-turn: call Step once per human turn, threading history.
+result, err = a.Step(ctx, history)
 ~~~
 
-Equivalent to `Trim` then `Loop`. No persistence, scheduler, runner, or hidden lifecycle.
+`Step` trims history once up front and again before every model call inside the loop (when a `ContextManager` is configured), so long autonomous runs don't silently blow the context window. `Hooks.OnIteration` observes each iteration; the underlying `Loop` and `ContextManager.Trim` primitives stay available if you want a different policy. No persistence, scheduler, runner, or hidden lifecycle.
 
 ## Built-in tools
 
@@ -266,7 +271,7 @@ _, _, err := client.AskStream(ctx, system, history, func(delta agent.ContentBloc
 })
 ~~~
 
-Use `LoopStream` or `Assistant.StepStream` for streamed tool loops.
+Use `LoopStream` or `Agent.StepStream` for streamed tool loops.
 
 Retries can restart a stream after partial output, so callbacks may see partial text from failed attempts. Use `StreamBuffer` with `RetryConfig.OnRetry` to react and clear:
 
@@ -364,7 +369,7 @@ go run ./examples/stream     # streaming
 
 Larger runnable patterns in `examples/recipes/`:
 
-- `01-assistant-with-tools` — curated toolset, middleware, context management
+- `01-agent-with-tools` — curated toolset, middleware, context management
 - `02-repo-explainer` — sandboxed workspace tools, streaming, file-backed sessions
 - `04-router-subagents` — orchestrator delegates to specialist subagents
 - `05-persistent-chat` — long-running conversation with `FileStore`

@@ -44,7 +44,7 @@ Sessions are stored under `~/.repo-explainer/<id>.json`.
 - `agent.ContextManager` with a real `Summarizer`
 - `agent.RenderForSummary` to flatten message history for the summarizer
 - `Client.WithModel` for cheap-summarizer cost-tiering
-- `agent.Assistant.StepStream`
+- `agent.Agent.StepStream`
 - `agent.NewStreamBuffer` paired with `RetryConfig.OnRetry`
 - `agent.MustJoin`, `Toolset.Wrap` with three middlewares
 - `agent.WithLogging`, `WithTimeout`, `WithResultLimit`
