@@ -282,11 +282,12 @@ func (c *Client) runLoop(
 			opts.onIter(ctx, iter, msgs)
 		}
 		req := ProviderRequest{
-			Model:     c.cfg.Model,
-			MaxTokens: c.cfg.MaxTokens,
-			System:    system,
-			Messages:  msgs,
-			Tools:     toolDefs,
+			Model:         c.cfg.Model,
+			MaxTokens:     c.cfg.MaxTokens,
+			System:        system,
+			Messages:      msgs,
+			Tools:         toolDefs,
+			ProviderTools: tools.ProviderTools,
 		}
 		emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventModelRequest})
 		var resp ProviderResponse

@@ -48,8 +48,17 @@ type ToolMetadata struct {
 // Toolset is an ordered collection of ToolBindings. It is the input shape
 // for Client.Loop and Client.LoopStream. Tools() and Dispatch() expose the
 // raw slice and map for callers that want to inspect or use them directly.
+//
+// ProviderTools holds server-executed (category-1) tools advertised to the
+// provider — e.g. Anthropic's web_search, code_execution. They have no Go
+// implementation; the provider runs them and returns inline result blocks.
+// The agent loop never inspects them: Tools() and Dispatch() ignore the slot
+// and only describe local Bindings. Use the typed provider constructors
+// (AnthropicWebSearch, etc.) and attach them via WithProviderTools or by
+// setting the field directly.
 type Toolset struct {
-	Bindings []ToolBinding
+	Bindings      []ToolBinding
+	ProviderTools []ProviderTool
 }
 
 // Tools is a variadic constructor for a Toolset. It is the most ergonomic
@@ -63,6 +72,19 @@ type Toolset struct {
 // Equivalent to Toolset{Bindings: []ToolBinding{...}}.
 func Tools(bindings ...ToolBinding) Toolset {
 	return Toolset{Bindings: bindings}
+}
+
+// WithProviderTools returns a copy of t with the supplied ProviderTools
+// appended to the existing slot. Useful for fluent composition:
+//
+//	tools := agent.Tools(localBinding).
+//	    WithProviderTools(agent.AnthropicWebSearch(agent.WebSearchOpts{MaxUses: 5}))
+func (t Toolset) WithProviderTools(pt ...ProviderTool) Toolset {
+	out := Toolset{
+		Bindings:      t.Bindings,
+		ProviderTools: append(append([]ProviderTool(nil), t.ProviderTools...), pt...),
+	}
+	return out
 }
 
 // Tools returns the Tool slice — the model-facing definitions — derived
@@ -87,6 +109,8 @@ func (t Toolset) Dispatch() map[string]ToolFunc {
 
 // Join merges multiple Toolset values into one, preserving order.
 // Returns an error if any tool name appears more than once across the sets.
+// ProviderTools are concatenated without deduplication (each entry is opaque
+// JSON; collision is ill-defined).
 func Join(sets ...Toolset) (Toolset, error) {
 	seen := make(map[string]bool)
 	var result Toolset
@@ -98,6 +122,7 @@ func Join(sets ...Toolset) (Toolset, error) {
 			seen[b.Tool.Name] = true
 			result.Bindings = append(result.Bindings, b)
 		}
+		result.ProviderTools = append(result.ProviderTools, s.ProviderTools...)
 	}
 	return result, nil
 }
@@ -123,8 +148,13 @@ type Middleware func(binding ToolBinding) ToolFunc
 // Wrap applies each Middleware to every binding in the Toolset, returning a
 // new Toolset with the decorated functions. Middlewares are applied in order,
 // so the first one listed is outermost (executes first and last).
+// ProviderTools (category-1) carry through unchanged — middleware applies
+// only to local Bindings.
 func (t Toolset) Wrap(middlewares ...Middleware) Toolset {
-	result := Toolset{Bindings: make([]ToolBinding, len(t.Bindings))}
+	result := Toolset{
+		Bindings:      make([]ToolBinding, len(t.Bindings)),
+		ProviderTools: t.ProviderTools,
+	}
 	for i, b := range t.Bindings {
 		wrapped := b
 		// Apply in reverse so the first listed middleware ends up outermost.

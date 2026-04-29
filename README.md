@@ -248,6 +248,34 @@ toolset := agent.MustJoin(clockTool.Toolset(), ws.Toolset())
 
 `workspace.NewReadOnly` is read-only. `workspace.New` includes `edit_file` — wrap it with `WithConfirmation` before letting writes run.
 
+## Provider tools
+
+Some tools live on the provider side: Anthropic and OpenAI ship a set of tools the model is already trained to use. They split into two shapes.
+
+**Server-executed (category 1):** the provider runs the tool and returns the result inline — `web_search`, `code_execution`. There is no Go function to write. Attach them via `ProviderTools`:
+
+~~~go
+toolset := agent.Tools(myLocalBinding).
+    WithProviderTools(
+        agent.AnthropicWebSearch(agent.WebSearchOpts{MaxUses: 3}),
+        agent.AnthropicCodeExecution(),
+    )
+result, err := client.Loop(ctx, system, history, toolset, 10)
+~~~
+
+The agent loop never dispatches these — when the model uses them the response carries `server_tool_use` and `*_tool_result` content blocks, which round-trip verbatim via `ContentBlock.Raw`.
+
+**Provider-defined schema, you execute (category 2):** the model has been trained on the tool's name and arguments, but you supply the runtime — `bash`, `text_editor`, `computer`. The wire declaration is `{type, name}` instead of `{name, description, input_schema}`, and the dispatch flow is identical to a normal tool. Constructors return ordinary `ToolBinding`s:
+
+~~~go
+bash := agent.AnthropicBashTool(func(ctx context.Context, in json.RawMessage) (string, error) {
+    // run the model's command in your sandbox of choice
+})
+toolset := agent.Tools(bash).Wrap(agent.WithConfirmation(promptUser))
+~~~
+
+Both flavors are tagged for one provider; passing them to a different one fails at request build with a clear error. OpenAI Chat Completions does not expose hosted tools — for `web_search`/`file_search`/`code_interpreter` you'll need a Responses-API provider, which is not part of this release.
+
 ## MCP
 
 `agent/mcp` adapts Model Context Protocol tools into ordinary toolsets.

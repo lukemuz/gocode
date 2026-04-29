@@ -23,6 +23,7 @@ Future work should make the common path shorter without introducing hidden model
 
 - **Lightweight multi-agent helpers.** Routing, critique, fan-out — only if the shape really is just functions over existing primitives.
 - **Cross-session memory.** Embeddings and vector stores belong in a separate package, not the core loop.
+- **OpenAI Responses-API provider.** Sibling to `OpenAIProvider`, posting to `/v1/responses`. Required for OpenAI's hosted tools (`web_search`, `file_search`, `code_interpreter`, `image_generation`) — the existing Chat Completions provider can't reach them. The `ProviderTools` plumbing already in place would carry the constructors.
 
 ## Non-goals
 

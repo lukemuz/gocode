@@ -71,13 +71,53 @@ func NewAnthropicClientFromEnv(model string) (*Client, error) {
 }
 
 // anthropicRequest is the JSON body sent to POST /v1/messages.
+// Tools is a pre-serialized slice so we can mix standard tool declarations
+// (Tool.MarshalJSON output) with the typed declaration form used by category-1
+// server tools (web_search, code_execution) and category-2 client-executed
+// tools (bash, text_editor, computer) — both encoded as opaque JSON that the
+// Anthropic API accepts directly.
 type anthropicRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system,omitempty"`
-	Messages  []Message `json:"messages"`
-	Tools     []Tool    `json:"tools,omitempty"`
-	Stream    bool      `json:"stream,omitempty"`
+	Model     string            `json:"model"`
+	MaxTokens int               `json:"max_tokens"`
+	System    string            `json:"system,omitempty"`
+	Messages  []Message         `json:"messages"`
+	Tools     []json.RawMessage `json:"tools,omitempty"`
+	Stream    bool              `json:"stream,omitempty"`
+}
+
+// providerTagAnthropic is the value Tool.Provider / ProviderTool.Provider
+// must carry for an entry to be accepted by the Anthropic provider.
+const providerTagAnthropic = "anthropic"
+
+// buildAnthropicTools merges local Tool declarations and provider-side
+// (category-1) ProviderTool entries into the wire []json.RawMessage that
+// becomes the Anthropic request's "tools" array. Any entry tagged for a
+// different provider is rejected so misuse fails loudly at request build.
+func buildAnthropicTools(tools []Tool, providerTools []ProviderTool) ([]json.RawMessage, error) {
+	if len(tools) == 0 && len(providerTools) == 0 {
+		return nil, nil
+	}
+	out := make([]json.RawMessage, 0, len(tools)+len(providerTools))
+	for _, t := range tools {
+		if t.Provider != "" && t.Provider != providerTagAnthropic {
+			return nil, fmt.Errorf("agent: anthropic: tool %q is tagged for provider %q", t.Name, t.Provider)
+		}
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return nil, fmt.Errorf("agent: anthropic: marshal tool %q: %w", t.Name, err)
+		}
+		out = append(out, raw)
+	}
+	for i, pt := range providerTools {
+		if pt.Provider != providerTagAnthropic {
+			return nil, fmt.Errorf("agent: anthropic: provider tool [%d] is tagged for provider %q", i, pt.Provider)
+		}
+		if len(pt.Raw) == 0 {
+			return nil, fmt.Errorf("agent: anthropic: provider tool [%d] has empty Raw", i)
+		}
+		out = append(out, pt.Raw)
+	}
+	return out, nil
 }
 
 // anthropicResponse is the parsed reply from the Anthropic API.
@@ -97,12 +137,16 @@ type apiErrorBody struct {
 
 // Call implements Provider.
 func (p *AnthropicProvider) Call(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
+	tools, err := buildAnthropicTools(req.Tools, req.ProviderTools)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 		System:    req.System,
 		Messages:  req.Messages,
-		Tools:     req.Tools,
+		Tools:     tools,
 	}
 
 	body, err := json.Marshal(wireReq)
@@ -154,12 +198,16 @@ func (p *AnthropicProvider) Call(ctx context.Context, req ProviderRequest) (Prov
 // ProviderResponse (handles one tool per turn for simplicity). Mirrors Call's
 // error handling, headers, and request shape (with stream=true).
 func (p *AnthropicProvider) Stream(ctx context.Context, req ProviderRequest, onDelta func(ContentBlock)) (ProviderResponse, error) {
+	tools, err := buildAnthropicTools(req.Tools, req.ProviderTools)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 		System:    req.System,
 		Messages:  req.Messages,
-		Tools:     req.Tools,
+		Tools:     tools,
 		Stream:    true,
 	}
 

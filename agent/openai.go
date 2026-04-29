@@ -161,12 +161,24 @@ func toOpenAIMessages(system string, messages []Message) []openAIMessage {
 }
 
 // toOpenAITools converts canonical Tools to OpenAI function-calling format.
-func toOpenAITools(tools []Tool) []openAIToolDef {
+// Provider-tagged tools (category 2 — Anthropic-only declaration shapes) and
+// any ProviderTools (category 1 — server-executed) are rejected: the Chat
+// Completions endpoint does not expose hosted tools, and provider-defined
+// declaration shapes cannot be translated faithfully. Callers who want
+// OpenAI-hosted tools (web_search, file_search, code_interpreter) need a
+// Responses-API provider, not Chat Completions.
+func toOpenAITools(tools []Tool, providerTools []ProviderTool) ([]openAIToolDef, error) {
+	if len(providerTools) > 0 {
+		return nil, fmt.Errorf("agent: openai (chat completions) does not support ProviderTools; use a Responses-API provider")
+	}
 	if len(tools) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]openAIToolDef, len(tools))
 	for i, t := range tools {
+		if t.Provider != "" && t.Provider != "openai" {
+			return nil, fmt.Errorf("agent: openai: tool %q is tagged for provider %q", t.Name, t.Provider)
+		}
 		var td openAIToolDef
 		td.Type = "function"
 		td.Function.Name = t.Name
@@ -174,7 +186,7 @@ func toOpenAITools(tools []Tool) []openAIToolDef {
 		td.Function.Parameters = t.InputSchema
 		out[i] = td
 	}
-	return out
+	return out, nil
 }
 
 // openAIFinishReason maps an OpenAI finish_reason to canonical StopReason.
@@ -301,11 +313,15 @@ func doOpenAICompatibleCall(
 	url string,
 	req ProviderRequest,
 ) (ProviderResponse, error) {
+	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	chatReq := openAIChatRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 		Messages:  toOpenAIMessages(req.System, req.Messages),
-		Tools:     toOpenAITools(req.Tools),
+		Tools:     openaiTools,
 	}
 
 	body, err := json.Marshal(chatReq)
@@ -361,11 +377,15 @@ func doOpenAICompatibleStream(
 	req ProviderRequest,
 	onDelta func(ContentBlock),
 ) (ProviderResponse, error) {
+	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	chatReq := openAIChatRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 		Messages:  toOpenAIMessages(req.System, req.Messages),
-		Tools:     toOpenAITools(req.Tools),
+		Tools:     openaiTools,
 		Stream:    true,
 	}
 

@@ -282,10 +282,29 @@ func buildFields(fields []Property) (map[string]SchemaProperty, []string) {
 // InputSchema is stored as pre-serialized JSON so callers can supply schemas
 // richer than InputSchema expresses (nested objects, arrays, $defs) without
 // the library needing to understand them.
+//
+// For provider-defined client-executed tools (category 2 — e.g. Anthropic's
+// bash_20250124, text_editor_20250124, computer_20250124) the wire shape is
+// {"type": "...", "name": "..."} rather than {name, description, input_schema}.
+// Such tools set Provider and Raw: Provider tags the binding to one provider,
+// and Raw is the verbatim JSON declaration spliced into the wire tools array.
+// Name remains populated so the agent loop can dispatch tool_use blocks
+// returned by the model.
 type Tool struct {
 	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+
+	// Provider, if set, restricts this tool to a specific provider tag
+	// (e.g. "anthropic"). Providers reject mismatched tools at request
+	// build time so misuse fails loudly rather than silently dropping the
+	// declaration.
+	Provider string `json:"-"`
+
+	// Raw, if set, replaces the wire serialization of this tool. Used by
+	// provider-defined tools whose declaration form is not the standard
+	// {name, description, input_schema}. The agent loop never inspects Raw.
+	Raw json.RawMessage `json:"-"`
 }
 
 // NewTool constructs a Tool from a typed InputSchema.
@@ -300,6 +319,30 @@ func NewTool(name, description string, schema InputSchema) Tool {
 		panic(fmt.Errorf("agent: marshal tool schema for %q: %w", name, err))
 	}
 	return Tool{Name: name, Description: description, InputSchema: raw}
+}
+
+// MarshalJSON emits Raw verbatim when set (category-2 provider-defined tools
+// have a non-standard wire form). Otherwise it emits the standard
+// {name, description, input_schema} object.
+func (t Tool) MarshalJSON() ([]byte, error) {
+	if len(t.Raw) > 0 {
+		return t.Raw, nil
+	}
+	type alias Tool
+	return json.Marshal(alias(t))
+}
+
+// ProviderTool is a server-executed (category-1) tool advertised to the model.
+// The provider runs it; no Go ToolFunc is needed. The agent loop never
+// inspects ProviderTools — they pass through ProviderRequest to the provider,
+// which splices Raw verbatim into its native tools array. Provider tags the
+// entry to a specific provider so misuse fails at request-build time.
+//
+// Use the typed constructors (AnthropicWebSearch, AnthropicCodeExecution, ...)
+// to build these rather than instantiating the struct directly.
+type ProviderTool struct {
+	Provider string          // e.g. "anthropic"
+	Raw      json.RawMessage // verbatim JSON spliced into the provider's tools array
 }
 
 // ToolResult is the output of one ToolFunc execution.
