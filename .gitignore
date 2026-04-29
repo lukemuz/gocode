@@ -8,6 +8,13 @@
 *.so
 *.dylib
 
+# Go build output (binaries produced by go build at repo root)
+/skills
+/agent
+/ask
+/pipeline
+/stream
+
 # Test binary, built with `go test -c`
 *.test
 

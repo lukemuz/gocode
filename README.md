@@ -524,10 +524,9 @@ Completed foundation:
 
 Next focus:
 
-1. transparent skills as bundles of instructions, tools, examples, and metadata
-2. streaming retry helper and documentation
-3. recipe-style documentation
-4. repo explainer example app
+1. streaming retry helper and documentation
+2. recipe-style documentation
+3. repo explainer example app
 5. production helpers: sessions, durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
 
 See [`ROADMAP.md`](ROADMAP.md) for details.
