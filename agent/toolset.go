@@ -86,8 +86,9 @@ func (t Toolset) Wrap(middlewares ...Middleware) Toolset {
 	result := Toolset{Bindings: make([]ToolBinding, len(t.Bindings))}
 	for i, b := range t.Bindings {
 		wrapped := b
-		for _, mw := range middlewares {
-			fn := mw(wrapped)
+		// Apply in reverse so the first listed middleware ends up outermost.
+		for j := len(middlewares) - 1; j >= 0; j-- {
+			fn := middlewares[j](wrapped)
 			wrapped = ToolBinding{Tool: wrapped.Tool, Func: fn, Meta: wrapped.Meta}
 		}
 		result.Bindings[i] = wrapped

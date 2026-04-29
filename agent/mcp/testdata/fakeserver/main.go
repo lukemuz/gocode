@@ -63,6 +63,14 @@ func main() {
 							"required": []string{"message"},
 						},
 					},
+					map[string]any{
+						"name":        "fail",
+						"description": "Always returns an error result.",
+						"inputSchema": map[string]any{
+							"type":       "object",
+							"properties": map[string]any{},
+						},
+					},
 				},
 			}
 		case "tools/call":
@@ -72,6 +80,13 @@ func main() {
 			}
 			if err := json.Unmarshal(req.Params, &params); err != nil {
 				result = map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "bad params"}}}
+				break
+			}
+			if params.Name == "fail" {
+				result = map[string]any{
+					"isError": true,
+					"content": []any{map[string]any{"type": "text", "text": "intentional failure"}},
+				}
 				break
 			}
 			var args map[string]string

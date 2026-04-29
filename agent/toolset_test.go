@@ -240,3 +240,57 @@ func TestWithLoggingSlogCompatible(t *testing.T) {
 	// Ensure *slog.Logger satisfies the Logger interface.
 	var _ Logger = slog.Default()
 }
+
+func TestWithResultLimitBelowMax(t *testing.T) {
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("small", func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "hi", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(WithResultLimit(100))
+	out, err := wrapped.Dispatch()["small"](context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "hi" {
+		t.Errorf("expected %q, got %q", "hi", out)
+	}
+}
+
+func TestWrapMiddlewareOrder(t *testing.T) {
+	// Each middleware records when its pre- and post-execution hooks run.
+	// We verify that middleware is applied outermost-first: mw1 wraps mw2 wraps the tool.
+	var log []string
+
+	record := func(label string) Middleware {
+		return func(b ToolBinding) ToolFunc {
+			return func(ctx context.Context, input json.RawMessage) (string, error) {
+				log = append(log, label+":before")
+				out, err := b.Func(ctx, input)
+				log = append(log, label+":after")
+				return out, err
+			}
+		}
+	}
+
+	ts := Toolset{Bindings: []ToolBinding{
+		makeTestBinding("tool", func(_ context.Context, _ json.RawMessage) (string, error) {
+			log = append(log, "tool")
+			return "ok", nil
+		}),
+	}}
+
+	wrapped := ts.Wrap(record("mw1"), record("mw2"))
+	wrapped.Dispatch()["tool"](context.Background(), nil)
+
+	want := []string{"mw1:before", "mw2:before", "tool", "mw2:after", "mw1:after"}
+	if len(log) != len(want) {
+		t.Fatalf("expected %v, got %v", want, log)
+	}
+	for i, v := range want {
+		if log[i] != v {
+			t.Errorf("step %d: expected %q, got %q", i, v, log[i])
+		}
+	}
+}

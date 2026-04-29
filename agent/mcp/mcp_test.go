@@ -1,10 +1,8 @@
 package mcp_test
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"testing"
@@ -12,8 +10,8 @@ import (
 	"github.com/lukemuz/gocode/agent/mcp"
 )
 
-// fakeServerPath builds and returns the path to the fake MCP server binary
-// used in integration tests. It is skipped if 'go build' is unavailable.
+// fakeServerPath builds and returns the path to the fake MCP server binary.
+// The test is skipped if 'go build' is unavailable.
 func fakeServerPath(t *testing.T) string {
 	t.Helper()
 	out := t.TempDir() + "/fake-mcp-server"
@@ -41,15 +39,19 @@ func TestConnectAndToolset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Toolset: %v", err)
 	}
-	if len(toolset.Bindings) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(toolset.Bindings))
+	if len(toolset.Bindings) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(toolset.Bindings))
 	}
 	b := toolset.Bindings[0]
 	if b.Tool.Name != "echo" {
-		t.Errorf("expected tool name %q, got %q", "echo", b.Tool.Name)
+		t.Errorf("expected first tool name %q, got %q", "echo", b.Tool.Name)
 	}
 	if b.Meta.Source != "mcp" {
 		t.Errorf("expected source %q, got %q", "mcp", b.Meta.Source)
+	}
+	// InputSchema should be non-empty JSON passed through from the server.
+	if len(b.Tool.InputSchema) == 0 {
+		t.Error("expected non-empty InputSchema")
 	}
 }
 
@@ -84,6 +86,32 @@ func TestToolCall(t *testing.T) {
 	}
 }
 
+func TestToolCallIsError(t *testing.T) {
+	serverBin := fakeServerPath(t)
+
+	ctx := context.Background()
+	srv, err := mcp.Connect(ctx, mcp.Config{Command: serverBin})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer srv.Close()
+
+	toolset, err := srv.Toolset(ctx)
+	if err != nil {
+		t.Fatalf("Toolset: %v", err)
+	}
+
+	fn, ok := toolset.Dispatch()["fail"]
+	if !ok {
+		t.Fatal("expected fail tool in dispatch")
+	}
+
+	_, err = fn(ctx, json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error from isError:true response")
+	}
+}
+
 func TestClose(t *testing.T) {
 	serverBin := fakeServerPath(t)
 
@@ -113,33 +141,4 @@ func TestConnectEmptyCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty command")
 	}
-}
-
-// --- helper: write a line-delimited JSON-RPC server used by fakeServer tests
-
-// fakeRPCServer is a minimal in-process MCP server for unit testing the
-// transport without spawning a subprocess. It is wired via io.Pipe.
-type fakeRPCServer struct {
-	serverIn  *os.File
-	serverOut *os.File
-	scanner   *bufio.Scanner
-}
-
-func newFakeRPCPair(t *testing.T) (clientIn, clientOut *os.File, scanner *bufio.Scanner) {
-	t.Helper()
-	// We only need fakeServerPath for the subprocess tests above.
-	// This helper is intentionally unused here but kept for future reference.
-	return nil, nil, nil
-}
-
-// writeResponse is a helper for the fake server binary (see testdata/).
-func writeResponse(w *bufio.Writer, id int64, result any) {
-	type resp struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int64  `json:"id"`
-		Result  any    `json:"result"`
-	}
-	line, _ := json.Marshal(resp{JSONRPC: "2.0", ID: id, Result: result})
-	fmt.Fprintln(w, string(line))
-	w.Flush()
 }
