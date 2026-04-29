@@ -30,7 +30,7 @@ type Clock struct {
 
 // New creates a Clock tool ready for use.
 func New() *Clock {
-	tool, _ := agent.NewTool(
+	tool := agent.NewTool(
 		"current_time",
 		"Returns the current UTC time in RFC3339 format.",
 		agent.Object(),

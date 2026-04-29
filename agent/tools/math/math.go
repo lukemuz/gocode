@@ -37,7 +37,7 @@ type input struct {
 
 // New creates a Calculator tool ready for use.
 func New() *Calculator {
-	tool, _ := agent.NewTool(
+	tool := agent.NewTool(
 		"calculator",
 		"Performs basic arithmetic. Supported operations: add, subtract, multiply, divide.",
 		agent.Object(

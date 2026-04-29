@@ -108,7 +108,7 @@ func TestAssistantStep(t *testing.T) {
 		c, _ := New(Config{Provider: p, Model: "test"})
 
 		var called bool
-		tool, fn, _ := NewTypedTool[struct{}](
+		tool, fn := NewTypedTool[struct{}](
 			"ping", "ping tool",
 			Object(),
 			func(_ context.Context, _ struct{}) (string, error) {

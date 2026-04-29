@@ -8,9 +8,10 @@
 *.so
 *.dylib
 
-# Go build output (binaries produced by go build at repo root)
+# Go build output (binaries produced by go build at repo root). Note: do not
+# add entries here that collide with package directory names (e.g. "agent")
+# — that would silently ignore source files in those packages.
 /skills
-/agent
 /ask
 /pipeline
 /stream

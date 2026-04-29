@@ -200,14 +200,15 @@ result, _ := client.Loop(ctx, a.System, trimmed, a.Tools, a.MaxIter)
 
 No persistence, runner, scheduler, or hidden lifecycle.
 
-## Ask vs Loop vs Assistant
+## Ask vs Loop vs Extract vs Assistant
 
 | Need | Use |
 |---|---|
-| One response | `Ask` |
+| One text response | `Ask` |
 | Streaming response | `AskStream` |
 | Model can call tools | `Loop` |
 | Streaming tool loop | `LoopStream` |
+| Typed value back (with or without tools) | `Extract[T]` |
 | Repeated assistant glue | `Assistant.Step` / `Assistant.StepStream` |
 | Independent fan-out | `Parallel` |
 

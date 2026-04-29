@@ -16,10 +16,23 @@ type ToolBinding struct {
 	Meta ToolMetadata
 }
 
-// ToolMetadata carries advisory safety annotations about a bound tool.
-// Fields are informational only; the library does not enforce any policy
-// based on them. Applications may inspect them to build confirmation
-// wrappers, audit logs, or permission checks.
+// Bind is the one-line constructor for a ToolBinding with no metadata.
+// Equivalent to ToolBinding{Tool: t, Func: fn}.
+func Bind(t Tool, fn ToolFunc) ToolBinding {
+	return ToolBinding{Tool: t, Func: fn}
+}
+
+// ToolMetadata carries advisory annotations about a bound tool.
+//
+// Most fields are informational only; the library does not enforce policy
+// based on them. Applications may inspect them to build confirmation wrappers,
+// audit logs, or permission checks.
+//
+// Terminal is the one field with semantic effect: when a tool with
+// Meta.Terminal == true is invoked successfully (no IsError result), Loop
+// and LoopStream return after appending the tool result message, without
+// asking the model for a final text turn. This is the primitive behind
+// Extract — it lets a "submit_X" style tool double as the loop's exit signal.
 type ToolMetadata struct {
 	Source               string
 	ReadOnly             bool
@@ -29,6 +42,7 @@ type ToolMetadata struct {
 	Shell                bool
 	RequiresConfirmation bool
 	SafetyNotes          []string
+	Terminal             bool
 }
 
 // Toolset is an ordered collection of ToolBindings. It is the input shape
@@ -36,6 +50,19 @@ type ToolMetadata struct {
 // raw slice and map for callers that want to inspect or use them directly.
 type Toolset struct {
 	Bindings []ToolBinding
+}
+
+// Tools is a variadic constructor for a Toolset. It is the most ergonomic
+// way to build a small toolset literally:
+//
+//	tools := agent.Tools(
+//	    agent.Bind(searchTool, searchFn),
+//	    agent.Bind(submitTool, submitFn),
+//	)
+//
+// Equivalent to Toolset{Bindings: []ToolBinding{...}}.
+func Tools(bindings ...ToolBinding) Toolset {
+	return Toolset{Bindings: bindings}
 }
 
 // Tools returns the Tool slice — the model-facing definitions — derived
