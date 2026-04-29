@@ -47,7 +47,7 @@ history := []agent.Message{
     agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
 }
 
-reply, err := client.Ask(context.Background(), "You are concise.", history)
+reply, _, err := client.Ask(context.Background(), "You are concise.", history)
 if err != nil {
     log.Fatal(err)
 }
@@ -93,7 +93,7 @@ Conversation history is plain data. Append replies yourself when you want to con
 ~~~go
 history := []agent.Message{agent.NewUserMessage("Hello")}
 
-reply, err := client.Ask(ctx, system, history)
+reply, _, err := client.Ask(ctx, system, history)
 history = append(history, reply, agent.NewUserMessage("Tell me more."))
 ~~~
 
@@ -129,8 +129,10 @@ No hidden registry.
 ### Tier 1: one model call
 
 ~~~go
-reply, err := client.Ask(ctx, system, history)
+reply, usage, err := client.Ask(ctx, system, history)
 ~~~
+
+`usage` reports the input/output tokens for that call so cost-conscious code doesn't have to drop down to `Loop`.
 
 ### Tier 2: parallel fan-out
 
@@ -233,7 +235,7 @@ You choose the server, inspect the tools, and pass them in.
 ## Streaming
 
 ~~~go
-_, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) {
+_, _, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) {
     if delta.Type == agent.TypeText {
         fmt.Print(delta.Text)
     }
@@ -250,7 +252,7 @@ sb := agent.NewStreamBuffer(
     func() { fmt.Print("\n[retrying…]\n") },
 )
 client, _ := agent.New(agent.Config{..., Retry: agent.RetryConfig{OnRetry: sb.OnRetry}})
-msg, err := client.AskStream(ctx, system, history, sb.OnToken)
+msg, _, err := client.AskStream(ctx, system, history, sb.OnToken)
 ~~~
 
 ## Sessions

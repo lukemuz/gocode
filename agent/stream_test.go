@@ -91,7 +91,7 @@ func TestStreamBufferWiredToRetryConfig(t *testing.T) {
 	}
 	c, _ := New(Config{Provider: stub, Model: "test", Retry: cfg})
 
-	_, err := c.AskStream(context.Background(), "", []Message{NewUserMessage("hi")}, sb.OnToken)
+	_, _, err := c.AskStream(context.Background(), "", []Message{NewUserMessage("hi")}, sb.OnToken)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
