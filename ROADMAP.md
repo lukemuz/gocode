@@ -2,1119 +2,231 @@
 
 `gocode` is a small, production-minded Go library for LLM calls, tools, and agent loops.
 
-For the product philosophy behind this plan, see [VISION.md](VISION.md).
+For the product philosophy, see [`VISION.md`](VISION.md). For usage, see [`README.md`](README.md) and [`QUICKSTART.md`](QUICKSTART.md).
 
-The project should scale from one function call to serious agent systems without forcing the serious-agent shape onto the first function call.
-
-The goal is:
-
-> Make easy things easy without making advanced things harder.
-
-`gocode` is not anti-convenience. It is anti-trap.
-
-A good abstraction should compress boilerplate, expose the primitives underneath, and be easy to bypass. A bad abstraction hides model calls, tool execution, memory mutation, persistence, or application lifecycle.
-
-## Vision
+## North star
 
 > Easy things easy. Hard things possible. Nothing hidden.
 
-`gocode` should feel like Go:
-
-- plain data
-- plain functions
-- explicit errors
-- composable primitives
-- easy testing
-- minimal magic
-- clear escape hatches
-
-The core promise is:
+The core promise remains:
 
 > You own the data. You own the tools. You own the loop.
 
-That means:
-
-- conversation history is a `[]Message`
-- tool dispatch is a plain `map[string]ToolFunc`
-- providers implement a small interface
-- loops are visible and understandable
-- retries, streaming, errors, and usage are explicit
-- context management is explicit
-- higher-level patterns are built from ordinary Go code
-- every convenience layer can be inspected, bypassed, or replaced
-
-The desired complexity curve is:
-
-| Task size | `gocode` experience |
-|---|---|
-| Simple task | Tiny setup |
-| Medium task | Ergonomic assembly |
-| Hard task | Explicit composition |
-
-The long-term product direction is:
-
-> `gocode` is the `net/http`-style agent library for Go services: boring, inspectable, flexible primitives with practical recipes that are easy to snap together.
-
-The product bar for every roadmap item is:
-
-> Does this make the common path easier while keeping execution visible?
-
-If yes, it likely belongs. If it adds power by introducing a hidden runtime model, hidden lifecycle, global registry, or framework-owned control flow, it should be deferred, redesigned, or kept outside the core.
-
-## Design principles
-
-### 1. Explicit core
-
-The core package should remain small and understandable.
-
-Core primitives include:
-
-- `Client`
-- `Provider`
-- `Message`
-- `ContentBlock`
-- `Tool`
-- `ToolFunc`
-- `Ask`
-- `Loop`
-- `AskStream`
-- `LoopStream`
-- `Parallel`
-- rich typed errors
-- retry configuration
-
-These are the durable low-level building blocks. They should remain inspectable and usable directly.
-
-### 2. Simple assembly
-
-Explicitness should not mean unnecessary ceremony.
-
-The library should make common workflows easy to assemble without hiding the underlying primitives. Convenience helpers are welcome when they compile down to obvious data structures and functions.
-
-A user should be able to start with one model call, add one tool, add a loop, and then adopt practical agent features like toolsets, context management, sessions, streaming, observability, and evaluation only when needed.
-
-Good convenience:
-
-- typed tool handlers
-- schema builders
-- pre-built safe tools
-- tool bundles
-- explicit context managers
-- basic, extensible agent blocks
-- testing helpers
-- provider constructors from environment
-- small session helpers
-
-Bad magic:
-
-- hidden model calls
-- hidden global state
-- hidden persistence
-- hidden context compaction
-- reflection-only APIs with no inspectable output
-- framework-owned runtimes
-- graph executors or schedulers inside the core
-- callbacks that invert application control
-
-The right shape is three paths:
-
-#### Path 1: Tiny
-
-One model call, minimal setup, no agent object required.
-
-#### Path 2: Practical
-
-Toolsets, context management, streaming, hooks, and a basic, extensible agent block for common agent workflows.
-
-#### Path 3: Full control
-
-Raw schemas, raw messages, manual loops, custom providers, explicit dispatch, and user-owned orchestration.
-
-All paths should lead to the same transparent core.
-
-### 3. Progressive complexity
-
-The learning path should be layered:
-
-1. Call a model with `Ask`.
-2. Continue a conversation by appending to `[]Message`.
-3. Add one tool with `Tool`, `ToolFunc`, and `Loop`.
-4. Make tools easier with typed helpers, schema builders, safe built-ins, and toolsets.
-5. Build a practical assistant with explicit context management and a thin step helper.
-6. Productionize with sessions, hooks, streaming, testing, evaluation, and replay.
-
-Each layer should be useful on its own. No layer should force users to adopt concepts from a later layer before they need them.
-
-Simple things should stay tiny. Medium things should get ergonomic helpers. Hard things should remain explicit and composable.
-
-### 4. Fewer concepts, better defaults
-
-`gocode` should compete on clarity, not feature count.
-
-Prefer improving existing primitives over adding new abstractions:
-
-- make `Loop` easier before adding an `Agent` type
-- make tool assembly easier before adding orchestration concepts
-- use `context.Context` and closures before inventing custom context objects
-- keep sessions as data before adding anything runner-like
-- provide recipes and examples before adding large abstractions
-
-Every new noun should pay rent. The core vocabulary should stay small.
-
-### 5. Tools should feel like Lego blocks
-
-Tools are the primary place where the library can become more useful without becoming a framework.
-
-A tool should be easy to:
-
-- define
-- test
-- inspect
-- compose
-- replace
-- sandbox
-- register explicitly
-
-Pre-built tools should be opt-in. They should expose normal `agent.Tool` definitions and normal `agent.ToolFunc` implementations. No tool should create hidden state, hidden loops, or hidden model calls.
-
-### 6. Agent-legible by design
-
-`gocode` should be easy for human developers and coding agents to understand.
-
-In an LLM-assisted coding world, a library should not require a coding agent to reverse-engineer framework concepts, search through extensive docs, or memorize opaque configuration patterns before it can make useful changes.
-
-The code should do what it looks like it does:
-
-- `Ask` should make one model call
-- `Loop` should run a visible tool loop
-- `ToolFunc` should be a normal Go function
-- `[]Message` should be the conversation history
-- `Toolset` should be a bundle of tools and dispatch functions
-- provider constructors should clearly say which provider they configure
-
-This matters because coding agents are increasingly part of the development workflow. They work best with APIs that are explicit, local, predictable, and easy to inspect.
-
-Design implications:
-
-- prefer obvious names over clever abstractions
-- prefer plain structs and functions over framework object graphs
-- keep configuration close to the call site
-- make examples copy-pasteable into real apps
-- avoid hidden registration, implicit global state, and runtime magic
-- expose the primitive underneath every convenience helper
-- make common tasks discoverable from code completion and type signatures
-- keep docs and examples aligned with the actual API shape
-
-A good test:
-
-> Could a coding agent understand this API from the names, types, and nearby examples without reading a long framework manual?
-
-If yes, it probably fits the project.
-
-### 7. Boring is good
-
-This project should prioritize reliability, inspectability, and Go-native ergonomics over novelty.
-
-The winning move is not "more agent stuff."
-
-The winning move is:
-
-> The boring, correct Go library for real LLM apps.
-
-## Direction relative to Google ADK
-
-`gocode` should be easier than Google ADK by having fewer concepts and less framework machinery.
-
-ADK-style systems can be powerful, but they often ask users to learn an application model: agents, runners, session services, artifact services, memory services, invocation contexts, tool contexts, callbacks, events, and deployment patterns.
-
-`gocode` should optimize for the opposite experience:
-
-- start with one function call
-- add one tool
-- add one loop
-- persist history explicitly when needed
-- stream output with ordinary callbacks
-- test with ordinary mocks
-- deploy inside any Go program
-
-The goal is not to match ADK feature-for-feature. The goal is to make the common path simpler and the control flow clearer.
-
-### Easier than ADK
-
-`gocode` should be easier because there is less to learn:
-
-- no required runner
-- no required session service
-- no required artifact service
-- no required memory service
-- no event model to understand before building
-- no deployment concept in the core library
-- normal Go functions for tools
-- normal Go slices for history
-- normal Go maps for dispatch
-- normal Go tests
-
-### More transparent than ADK
-
-`gocode` should be more transparent because every important operation is visible:
-
-- every model call goes through `Ask`, `AskStream`, `Loop`, or `LoopStream`
-- every tool call maps to a `ToolFunc`
-- every conversation is a `[]Message`
-- every provider translates through the same canonical types
-- every session, when added, is just data plus explicit storage
-- every higher-level helper should reveal the primitive underneath
-
-### Easier to implement than ADK
-
-`gocode` should stay easy to implement and reason about internally:
-
-- providers are small interfaces
-- tools are plain functions
-- loops are regular Go loops
-- storage is a small interface
-- helpers compose existing primitives
-- examples can be copied into real apps
-
-ADK gives users an application model. `gocode` gives users application parts.
-
-That distinction should guide every roadmap decision.
+Roadmap items should make the common path easier without introducing hidden model calls, hidden tool execution, hidden persistence, global registries, or framework-owned control flow.
 
 ## Current baseline
 
-The foundation is now the baseline, not future roadmap work.
+The foundation is implemented and should no longer be tracked as future work.
 
-Already available:
+Available today:
 
-- model-agnostic provider interface
+- `Client`, `Provider`, `Message`, `ContentBlock`, `Tool`, `ToolFunc`, and `ToolResult`
 - Anthropic, OpenAI, and OpenRouter providers
-- canonical `Message`, `ContentBlock`, `Tool`, and `ToolResult` types
-- single-call API with `Ask`
-- agent loop API with `Loop`
-- streaming APIs with `AskStream` and `LoopStream`
-- generic `Parallel`
+- provider and client constructors from environment variables
+- `Ask` and `AskStream` for single model calls
+- `Loop` and `LoopStream` for tool-using loops
+- concurrent execution of multiple tool calls in one model turn
+- `Parallel` for fan-out/fan-in workflows
 - retry with exponential backoff and jitter
-- rich typed errors
-- usage aggregation
-- comprehensive tests around core loop, retry, provider behavior, streaming, and errors
-- examples for ask, pipeline, agent loop, and streaming
-- rewritten quickstart focused on first-run clarity
-- tool ergonomics helpers
-- schema builder helpers
+- typed errors and usage aggregation
+- schema builders, `TypedToolFunc`, `NewTypedTool`, and `JSONResult`
+- `ToolBinding`, `Toolset`, `Join`, and middleware wrappers
+- `WithTimeout`, `WithResultLimit`, `WithLogging`, `WithPanicRecovery`, and `WithConfirmation`
+- explicit `ContextManager` with optional summarization
+- basic `Assistant` and `Assistant.StepStream`
+- safe built-in tools:
+  - `agent/tools/clock`
+  - `agent/tools/math`
+  - `agent/tools/workspace` with sandboxed list, find, search, read, file info, and exact-string edit
+- MCP adapter in `agent/mcp`
+- core tests and examples for ask, pipeline, agent loop, and streaming
 
-The roadmap below focuses only on future work: safer tool extension, easier assembly, better examples, and boring production helpers.
+## Product principles for future work
 
----
+1. **Keep the primitive path tiny.** One model call should not require an agent object, session, runner, graph, or framework lifecycle.
+2. **Make the practical path short.** Common agent assembly should use toolsets, context management, middleware, and the assistant block instead of repeated glue.
+3. **Preserve the control path.** Raw messages, raw tools, manual loops, custom providers, and user-owned orchestration must remain first-class.
+4. **Prefer ordinary Go.** Plain structs, functions, slices, maps, errors, `context.Context`, and interfaces beat framework vocabulary.
+5. **No hidden ownership.** The library should not own persistence, scheduling, deployment, global registration, memory policy, or application lifecycle.
+6. **Tools are Lego blocks.** Tools, MCP adapters, and skills should all compile down to inspectable `ToolBinding` values.
+7. **Boring is good.** Reliability, inspectability, and testability matter more than adding agent vocabulary.
 
-## P1 — Make practical agents dramatically easier
+## P1 — Finish the practical agent path
 
-These are the highest-leverage next steps.
+P1 focuses on completing the path from primitives to useful local assistants.
 
-P1 is about making real agent assembly feel effortless without introducing a hidden runtime. The easy path should become much shorter, while the explicit path remains available for users who want full control.
+### 1. Native skills support
 
-The immediate product goal is a practical agent pattern that combines:
+**Priority:** high  
+**Status:** next
 
-- parallel tool execution for correctness and speed
-- safe tools, including edit capability for coding agents
-- a compelling example app that forces real composition of all the pieces
-- toolsets, dispatch helpers, and a `WithConfirmation` middleware
-- explicit context management
-- a basic, extensible `Assistant` block as the P1 centerpiece
-- streaming retry semantics locked down before more streaming use cases are built
-- native MCP and skills support for progressive prompt discovery
-- practical assistant recipes
-
-This should make useful agents easier to build without making one-off model calls any heavier.
-
-### 1. Parallel tool execution
-
-Priority: high. Ship before the `Assistant` block.
-
-Problem:
-
-`runTools` in `agent.go` executes tool calls sequentially. When the model requests multiple tools in one turn — three file reads, a search plus a file read, a batch of queries — each call waits for the previous one to finish. This is a correctness issue as much as a performance issue: sequential execution silently penalizes every multi-tool turn in every application.
-
-Goal:
-
-Execute all tool calls in a single turn concurrently, using the same goroutine pattern already established by `Parallel`. Return results in the original order so the model's context is stable.
-
-Possible implementation:
-
-~~~go
-func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]ToolFunc) ([]ToolResult, error) {
-    uses := extractToolUses(content)
-    results := make([]ToolResult, len(uses))
-    // spawn one goroutine per tool use; collect into index-aligned results
-    ...
-}
-~~~
-
-Principles:
-
-- tool calls within a single turn are independent by definition (the model issued them together)
-- results must be returned in the original order so tool_use IDs align with tool_result IDs
-- a missing tool (programming error) should still abort immediately rather than waiting for other calls to finish
-- individual tool errors remain soft (fed back to model as `is_error: true`) — this does not change
-- callers should not need to change any code; this is a transparent correctness fix
-
-This ships before the `Assistant` block so the block inherits correct concurrent execution from the start.
-
-### 2. Safe pre-built tool library
-
-Priority: high.
-
-Problem:
-
-Every user rewrites the same common tools. This makes early examples longer and distracts from actual application logic.
-
-Goal:
-
-Provide a small, safe, well-tested tool library.
-
-This is not a framework. It is a box of useful Lego bricks.
+A skill is an inspectable bundle of instructions, tools, examples, and metadata. It is not an autonomous agent and does not own a loop.
 
 Possible package:
 
-```go
-github.com/lukemuz/gocode/agent/tools
-```
-
-Initial tool ecosystem scope should be deliberate and small.
-
-For P1, `gocode` should focus on:
-
-1. local safe primitives
-2. MCP as the primary external tool adapter
-3. transparent skills
-4. tool bindings, toolsets, and middleware/wrappers
-
-A general shell command tool can technically cover many local capabilities: grep, git, tests, package managers, code generation, and arbitrary scripts. That means every built-in tool needs to justify itself by being meaningfully better than shell in at least one way:
-
-- safer
-- more bounded
-- more portable
-- easier to test
-- easier for models to call correctly
-- easier to inspect
-- less dependent on ambient machine state
-- less likely to expose secrets or mutate external systems accidentally
-
-The built-in library should focus first on primitives where typed, sandboxed implementations provide clear value over shell. External product integrations should primarily come through MCP, user-defined tools, or community packages rather than a large built-in catalog.
-
-Initial core built-ins.
-
-These are the strongest candidates because they are broadly useful, can be implemented safely, and avoid handing the model arbitrary command execution. This is the initial scope to design and implement first.
-
-| Tool | Package direction | Why it deserves to exist |
-|---|---|---|
-| current time | `tools/clock` | safe default, useful in quickstarts |
-| calculator | `tools/math` | simple demo and test utility |
-| workspace list directory | `tools/workspace` | safer and more portable than shelling out to `ls` |
-| workspace find files | `tools/workspace` | bounded path search with root-relative paths and ignore rules |
-| workspace grep/search text | `tools/workspace` | bounded content search without arbitrary shell access |
-| workspace read file | `tools/workspace` | sandboxed reads with max bytes and optional line ranges |
-| workspace file info | `tools/workspace` | safe metadata without exposing a general command runner |
-| workspace edit file | `tools/workspace` | exact-string replacement with expected match count; the minimum mutation primitive for coding agents; read-only is a dead end without it |
-
-`workspace edit file` belongs in the initial core because read-only filesystem tools are only useful up to a point. Any coding agent that can read but cannot write is incomplete. Exact-string replacement (with an optional expected-match count to guard against ambiguous edits) is meaningfully safer than a general write, easier for models to call correctly, and bounded by the workspace root. This is the one mutation primitive that justifies its inclusion in the core; `write_file` and `create_directory` can follow later.
-
-Possible later built-ins.
-
-These are useful, but should not be added just because coding agents commonly need them. If shell access is already enabled, some of these may be redundant. If MCP support is available, many external capabilities may be better supplied by MCP servers.
-
-| Tool | Package direction | Open question |
-|---|---|---|
-| workspace create directory | `tools/workspace` | worthwhile if bundled with sandboxing and confirmation wrappers |
-| workspace write file | `tools/workspace` | worthwhile if safer than full shell writes and bounded by root |
-| workspace move path | `tools/workspace` | maybe; useful but clearly mutating |
-| HTTP GET/JSON fetch | `tools/http` | maybe; network access requires allowlists, timeouts, and response limits |
-| HTTP POST | `tools/http` | maybe later; external mutation requires stronger allowlists and confirmation |
-| web search adapter | `tools/search` | likely defer; usually better as MCP or user-supplied provider/API key |
-| read-only git status/diff/log/show | `tools/git` | maybe later; only worth it if bounded, portable, and safer than shelling out |
-
-Tier 3: escape hatches and dangerous capabilities.
-
-These should exist, if at all, behind intentionally loud APIs, strong documentation, timeouts, and ideally confirmation wrappers.
-
-| Tool | Package direction | Notes |
-|---|---|---|
-| shell command | `tools/shell` | powerful escape hatch; may eliminate the need for many specialized local command wrappers |
-| workspace delete path | `tools/workspace` | dangerous; maybe defer until edit/write semantics are mature |
-| mutating git commands | `tools/git` | probably defer; shell or user-defined tools may be enough |
-| arbitrary external mutation adapters | adapter packages | should be wrapped, filtered, and inspected before use |
-
-Design shape:
-
-```go
-clock := tools.NewClock()
-
-toolsList := []agent.Tool{
-	clock.Tool,
-}
-
-dispatch := map[string]agent.ToolFunc{
-	clock.Tool.Name: clock.Func,
-}
-```
-
-Or:
-
-```go
-bundle := tools.NewFilesystem("/safe/root")
-
-toolsList := bundle.Tools()
-dispatch := bundle.Dispatch()
-```
-
-Principles:
-
-- all tools are explicitly registered
-- all tool implementations are visible in source
-- safe defaults over convenience at all costs
-- workspace and filesystem tools are sandboxed by default
-- workspace paths are root-relative by default
-- read-only workspace tools are the default coding-agent toolset
-- write/edit/delete tools are separate explicit opt-ins
-- grep/search tools must bound scanned files, result count, and output size
-- file reads must bound size and support partial reads where practical
-- network/HTTP tools, if added, require allowlists, timeouts, and response size limits
-- shell execution is never enabled casually
-- typed command wrappers should exist only when they are materially safer or clearer than shell
-- shell is an escape hatch, not the default abstraction for common safe operations
-- dangerous tools should be easy to wrap with confirmation, logging, and timeouts
-- no hidden persistence
-- no hidden background work
-- no hidden model calls
-
-### 3. Native MCP support
-
-Priority: high.
-
-Problem:
-
-MCP is becoming a standard way to expose tools and external capabilities to LLM applications. If `gocode` wants to be easy to build with, users should not have to hand-wrap every MCP server as custom `Tool` and `ToolFunc` values.
-
-Goal:
-
-Support MCP as the primary external tool adapter for P1.
-
-The user should be able to connect to an MCP server, inspect the tools it exposes, and adapt selected tools into normal `gocode` primitives. MCP should make the broader tool ecosystem available without `gocode` becoming an integration marketplace.
-
-Possible API shape:
-
-```go
-server, err := mcp.Connect(ctx, mcp.Config{
-	Command: "my-mcp-server",
-	Args:    []string{"--stdio"},
-})
-
-toolset, err := server.Toolset(ctx)
-
-result, err := client.Loop(ctx, system, history, toolset.Tools, toolset.Dispatch, 10)
-```
-
-MCP is also `gocode`'s answer to the broader tool ecosystem. Vector databases, document parsers, embedding APIs, web search adapters, and language-specific integrations increasingly expose MCP servers — many already implemented in Python, TypeScript, or Rust. Rather than porting those client libraries to Go, users connect to an MCP server and the tools become ordinary `agent.Tool` definitions. This is the polyglot tool bridge: Go handles orchestration, tools live in whatever language makes sense. Users should not need to choose between Go's production characteristics and the Python/TypeScript tool ecosystem.
-
-Principles:
-
-- MCP tools should become ordinary `agent.Tool` definitions and ordinary `agent.ToolFunc` handlers
-- users should explicitly choose which MCP servers to connect to
-- users should explicitly pass MCP tools into `Loop`
-- no global MCP registry
-- no hidden background tool execution
-- no hidden model calls
-- connection lifecycle should be explicit and closeable
-- MCP schemas and tool names should be inspectable before use
-- transport details should be isolated from the core `agent` package
-- unsafe MCP tools should be easy to filter, rename, wrap, or sandbox
-
-Package direction:
-
-```text
-github.com/lukemuz/gocode/agent/mcp
-```
-
-MCP support should make `gocode` easier to use with the broader tool ecosystem without turning the library into an orchestration framework.
-
-OpenAPI note:
-
-OpenAPI is a machine-readable standard for describing HTTP APIs, often in `openapi.yaml`, `openapi.json`, or older Swagger files. An OpenAPI adapter could eventually turn selected HTTP API operations into ordinary `gocode` tools.
-
-OpenAPI support is useful, but it should be deferred for now. It is less urgent than MCP because MCP is becoming the common tool protocol for agents. OpenAPI also raises design questions around auth, endpoint filtering, mutating operations, pagination, response shaping, rate limits, and large schemas.
-
-If added later, OpenAPI should follow the same rule as MCP: selected operations become ordinary `agent.Tool` definitions and ordinary `agent.ToolFunc` handlers. Users must explicitly choose the spec, allowed operations, auth, timeouts, and safety wrappers.
-
-### 4. Native skills support
-
-Priority: high.
-
-Problem:
-
-Some useful capabilities are larger than a single tool call. They are repeatable bundles of prompts, tools, constraints, examples, and instructions. These are often called "skills."
-
-If tools are individual Lego bricks, skills are small pre-built assemblies.
-
-Goal:
-
-Support skills as transparent, composable bundles that can be inspected and adapted.
-
-A skill should be able to provide:
-
-- instructions or system prompt fragments
-- one or more tools
-- dispatch functions
-- examples or usage notes
-- optional setup/validation logic
-- optional metadata such as name, description, and safety notes
-
-Possible API shape:
-
-```go
-skill := skills.NewRepoExplainer(skills.RepoExplainerConfig{
-	Root: ".",
-})
-
-system := agent.JoinInstructions(
-	baseSystem,
-	skill.Instructions(),
-)
-
-toolset := skill.Toolset()
-
-result, err := client.Loop(ctx, system, history, toolset.Tools, toolset.Dispatch, 10)
-```
-
-Principles:
-
-- a skill is not an autonomous agent
-- a skill does not own the loop
-- a skill does not call the model by itself
-- a skill should expose ordinary tools, instructions, and configuration
-- users should be able to inspect, modify, or ignore any part of a skill
-- skills should compose with `Toolset`
-- skills should be easy for coding agents to understand from their names and types
-- skills should be useful shortcuts, not hidden runtimes
-
-Package direction:
-
-```text
+~~~text
 github.com/lukemuz/gocode/agent/skills
-```
+~~~
 
-Good initial skills might include:
+Possible shape:
+
+~~~go
+skill := skills.NewRepoExplainer(skills.RepoExplainerConfig{Root: "."})
+
+system := agent.JoinInstructions(baseSystem, skill.Instructions())
+toolset, err := agent.Join(localTools, skill.Toolset())
+
+result, err := client.Loop(ctx, system, history, toolset.Tools(), toolset.Dispatch(), 10)
+~~~
+
+Initial skill candidates:
 
 - repo explainer
 - log summarizer
 - code review helper
 - local docs Q&A
 
-Issue triage and HTTP research with citations may be useful later, but they likely depend on external systems, network access, search providers, or MCP servers. They should not be part of the first skills commitment unless their tool dependencies are explicit and safe.
-
-Skills should make common higher-level workflows easier while preserving the central promise:
-
-> You own the data. You own the tools. You own the loop.
-
-### 5. Tool bindings, toolsets, and dispatch helpers
-
-Priority: medium-high.
-
-Problem:
-
-Even with pre-built tools, users need a simple way to merge tool definitions and dispatch maps.
-
-Goal:
-
-Make assembly easy while keeping the resulting `[]Tool` and `map[string]ToolFunc` obvious.
-
-This may be more important than sessions in the near term because it directly supports the Lego-block model. Local tools, MCP tools, and skill tools should all compose through the same shape.
-
-Possible APIs:
-
-```go
-type ToolBinding struct {
-	Tool Tool
-	Func ToolFunc
-	Meta ToolMetadata
-}
-
-type ToolMetadata struct {
-	Source               string
-	ReadOnly             bool
-	Destructive          bool
-	Network              bool
-	Filesystem           bool
-	Shell                bool
-	RequiresConfirmation bool
-	SafetyNotes          []string
-}
-
-type Toolset struct {
-	Bindings []ToolBinding
-}
-
-func (t Toolset) Tools() []Tool
-func (t Toolset) Dispatch() map[string]ToolFunc
-```
-
-```go
-toolset, err := tools.Join(
-	tools.NewClock(),
-	workspace.NewReadOnly(workspace.Config{
-		Root: ".",
-	}),
-	mcpToolset,
-)
-
-toolset = toolset.Wrap(
-	tools.WithTimeout(5 * time.Second),
-	tools.WithResultLimit(20_000),
-	tools.WithLogging(logger),
-)
-
-result, err := client.Loop(ctx, system, history, toolset.Tools(), toolset.Dispatch(), 10)
-```
-
-Middleware and wrappers:
-
-- timeout
-- result size limit
-- logging
-- confirmation (see below)
-- panic recovery
-- redaction
-- retry, only when explicitly configured
-
-`WithConfirmation` is a first-class middleware, not an afterthought. `ToolMetadata.RequiresConfirmation` already exists as a flag but currently does nothing — there must be a provided way to act on it. The shape should accept a caller-supplied prompt function so the library stays UI-agnostic:
-
-~~~go
-func WithConfirmation(prompt func(ctx context.Context, binding ToolBinding, input json.RawMessage) (bool, error)) Middleware
-~~~
-
-When `prompt` returns `false`, the tool call is skipped and a descriptive string is returned to the model instead of an error, so it can explain the situation to the user. When `prompt` returns an error, the call is treated as a hard tool error.
-
-A common pattern is to apply `WithConfirmation` only to bindings where `Meta.RequiresConfirmation` is true:
-
-~~~go
-toolset.Wrap(agent.WithConfirmation(func(ctx context.Context, b agent.ToolBinding, input json.RawMessage) (bool, error) {
-    if !b.Meta.RequiresConfirmation {
-        return true, nil
-    }
-    fmt.Printf("Allow %s? [y/N] ", b.Tool.Name)
-    var answer string
-    fmt.Scanln(&answer)
-    return strings.ToLower(answer) == "y", nil
-}))
-~~~
-
-Middleware clarification:
-
-Tools may be requested by the model during `Loop`, but they are still executed by application-owned Go functions in the dispatch map. The model chooses a tool name and JSON arguments. `gocode` looks up the matching `ToolFunc` and calls it.
-
-That dispatch boundary is where middleware applies.
-
-Middleware should wrap tool bindings before they are passed into `Loop`. It should decorate the ordinary `ToolFunc` implementation with behavior such as logging, timeout, confirmation, result limiting, redaction, or retry. The wrapped function still has the same `ToolFunc` signature, so the core loop does not need to know that middleware exists.
-
-Middleware should probably operate on `ToolBinding` rather than only bare `ToolFunc` values, because useful wrappers often need access to the tool name, schema, source, metadata, and safety notes. Internally, the wrapper still replaces `binding.Func` with another ordinary `ToolFunc`.
-
-This also means tools are more universal than agent calls. A tool can be executed by the model loop, a deterministic workflow, a test, a CLI command, an HTTP handler, or a skill validation step. The same binding and middleware model should work in all of those cases.
-
-MCP tools follow the same rule. An MCP adapter exposes each remote MCP tool as a local `ToolFunc` that sends a call to the MCP server. Middleware can wrap that local adapter function just like any other tool.
-
 Principles:
 
+- expose ordinary instructions, `Toolset`, examples, and metadata
+- no hidden model calls
+- no hidden loop
 - no global registry
-- no implicit registration
-- no hidden tool execution policy
-- duplicate tool names should produce clear errors
-- users can inspect and modify the result before passing it to `Loop`
-- middleware wraps ordinary `ToolFunc` values rather than changing the core loop
-- metadata is advisory and inspectable, not a hidden permission engine
-- logging and confirmation should be interfaces supplied by the application, not hard dependencies on a logging framework or UI
+- compose with local tools and MCP tools
+- let callers inspect, adapt, wrap, or ignore any part
 
-### 6. Explicit context management
+### 2. Streaming retry semantics
 
-Priority: high.
+**Priority:** high  
+**Status:** next
 
-Problem:
+Current streaming callbacks may receive partial output from failed retry attempts before the successful attempt starts. That behavior is visible and honest, but it is easy to mishandle in CLIs and SSE endpoints.
 
-`gocode` sends whatever `[]Message` the caller provides. Useful tool-using agents quickly create context pressure because tool calls and tool results pile up.
+Recommended path:
 
-Goal:
-
-Provide context helpers that make budget management explicit, configurable, and easy to include in the practical agent pattern.
-
-Possible API:
-
-~~~go
-type ContextManager struct {
-	MaxTokens    int
-	KeepRecent   int
-	KeepFirst    int
-	TokenCounter func([]Message) (int, error)
-	Summarizer   func(context.Context, []Message) (string, error)
-}
-
-func (m ContextManager) Trim(ctx context.Context, history []Message) ([]Message, error)
-~~~
+- keep the existing `onToken func(ContentBlock)` signature
+- document the retry interaction prominently
+- provide a small stateful helper for callers that need clean buffering or reset behavior
+- use the helper in streaming recipes and the future HTTP/SSE example
 
 Principles:
 
-- `Loop` should still send the history it is given
-- context management should be explicit at the call site or in the assistant config
-- original history should not be mutated
-- trimming should preserve tool-use/tool-result integrity
-- summarization should only happen when explicitly configured
-- model calls for summarization should be visible and caller-owned
-- summarization should usually be application-driven, not exposed as a model-callable tool
-- context management should be part of the recommended practical agent recipe, not an obscure advanced feature
+- do not silently deduplicate streamed tokens
+- do not buffer the whole response before delivery
+- avoid breaking callback signatures unless clearly necessary
+- make retry behavior visible to callers
 
-### 7. Basic, extensible agent block
+### 3. Recipe documentation
 
-Priority: high. This is the P1 centerpiece.
+**Priority:** medium-high  
+**Status:** next
 
-Problem:
+Add small, copy-pasteable recipes that teach one pattern at a time. Recipes should show both the convenient path and the primitive underneath when that improves understanding.
 
-The primitive `Loop` is intentionally explicit, but real applications should not need to repeatedly hand-wire the same context, toolset, and loop glue. Many useful assistants need the same assembled block: context management, tool dispatch, loop execution, hooks, and updated history.
-
-Goal:
-
-Provide a basic, extensible agent block: an assembled primitive with batteries included, but designed to be customized, embedded, and built on.
-
-This is the item that makes `gocode` feel like it has a blessed path. Once `Assistant.Step` exists with context trimming built in, the examples improve dramatically, the repo explainer example becomes a tight loop with no boilerplate, and the recipes section becomes genuinely copy-pasteable. Items 1–6 build the parts; this item assembles them into a shape developers can hand to a colleague and say "start here."
-
-The goal is not to ship a complete Claude Code-style product. The goal is to provide the reusable agent block that many Claude Code-style systems, repo assistants, internal copilots, and tool-using applications need.
-
-Possible API:
-
-~~~go
-type Assistant struct {
-	Client  *Client
-	System  string
-	Tools   Toolset
-	Context ContextManager
-	MaxIter int
-	Hooks   Hooks
-}
-
-func (a Assistant) Step(ctx context.Context, history []Message) (LoopResult, error)
-~~~
-
-Conceptually, `Step` should still be equivalent to ordinary Go code:
-
-1. trim history if context management is configured
-2. call `Client.Loop`
-3. return the `LoopResult`
-
-This block should have batteries, but it should invite customization. Users should be able to swap the client, tools, context manager, summarizer, hooks, model, prompts, and storage strategy without changing the underlying data model.
-
-It should feel like a reusable component that can live inside a CLI command, HTTP handler, worker, test, or larger agent system.
-
-Principles:
-
-- no hidden persistence
-- no background runtime
-- no scheduler
-- no graph executor
-- no global tool registry
-- caller owns history
-- caller decides when a step runs
-- desugared behavior should be documented
-- users can drop down to `Loop` at any time
-
-This is the middle layer: more ergonomic than raw `Loop`, but still built from the same primitives.
-
-In short:
-
-> An assembled agent primitive, not an application runner.
-
-### 8. Streaming retry semantics
-
-Priority: high. Decide and document before P2 work multiplies the problem.
-
-Problem:
-
-When `callWithRetry` fires a retry mid-stream, the `onToken` callback is invoked again from the beginning of the response. In a CLI printing tokens live to stdout, the user sees duplicate partial text. In a web SSE handler, the client receives duplicate events. This is currently documented but not mitigated, and the problem compounds as more streaming use cases are added in P2.
-
-Goal:
-
-Pick a design and commit to it before the `Assistant` block, the HTTP/SSE example, and other streaming patterns are built on top of the current behavior.
-
-Three options:
-
-**Option A — Pass retry attempt number to the callback.**
-The `onToken` signature gains an attempt parameter. Callers know to reset their output buffer when attempt > 0.
-
-~~~go
-onToken func(delta ContentBlock, attempt int)
-~~~
-
-Con: changes every existing streaming caller.
-
-**Option B — Add an `onRetry()` callback alongside `onToken`.**
-When a retry fires, `onRetry()` is called first, giving the caller a chance to clear state or emit a reset signal before the new stream begins.
-
-~~~go
-onRetry func()
-~~~
-
-Pro: `onToken` signature stays the same. Con: callers must coordinate two callbacks.
-
-**Option C — Document the pattern and provide a stateful wrapper.**
-Keep the current signatures. Provide a `NewStreamBuffer` helper that wraps `onToken`, detects retries via a sequence counter, and exposes a clean `Text() string` and `Reset()` method. Callers who need deduplication use the wrapper; callers who don't ignore the issue.
-
-Pro: zero breaking changes, opt-in. Con: the footgun remains for callers who don't know to look for it.
-
-Recommendation: Option C. It preserves the existing simple callback contract, is opt-in, and the wrapper pattern is consistent with the library's philosophy of providing thin helpers over primitives. The wrapper should be included in the streaming recipe and used in the HTTP/SSE example.
-
-Principles:
-
-- do not silently deduplicate tokens (would hide retry behavior from callers)
-- do not buffer the entire stream before delivery (defeats the purpose of streaming)
-- keep the `onToken` signature compatible unless the design clearly requires a break
-- document the retry-callback interaction prominently in the streaming recipe
-- resolve this before building the HTTP/SSE service example, which will hit it immediately
-
-### 9. Provider setup helpers
-
-Priority: done.
-
-Problem:
-
-The current provider setup is explicit and fine, but quick examples still require repeated environment-variable boilerplate.
-
-Goal:
-
-Offer small convenience helpers for common setup without hiding configuration.
-
-Implemented:
-
-```go
-// Provider-level (for callers who need custom MaxTokens, retry, or HTTP config)
-provider, err := agent.NewAnthropicProviderFromEnv()
-provider, err := agent.NewOpenAIProviderFromEnv()
-provider, err := agent.NewOpenRouterProviderFromEnv()
-
-// Client-level (single-line setup for the simple case)
-client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
-client, err := agent.NewOpenAIClientFromEnv("gpt-4o")
-client, err := agent.NewOpenRouterClientFromEnv("anthropic/claude-sonnet-4-6")
-```
-
-Principles:
-
-- helpers are clearly named — provider, env var source, and level are all explicit
-- missing environment variables return normal errors naming the expected variable
-- explicit provider constructors remain the canonical path for custom config
-- no global default client
-- no package-level hidden state
-- no automatic provider selection
-
-### 10. Recipes documentation
-
-Priority: medium-high.
-
-Problem:
-
-To be easier than ADK, the library needs many small copy-pasteable recipes, not just architectural explanation.
-
-Goal:
-
-Add recipe-style docs that teach one pattern at a time.
-
-Possible recipes:
+Initial recipes:
 
 - ask a model
 - continue a conversation
 - add one tool
 - use a typed tool
-- use a safe filesystem tool
-- build a basic assistant step
-- add explicit context management to an assistant
-- compose an assistant from a toolset
-- desugar an assistant step into `ContextManager.Trim` plus `Client.Loop`
+- use built-in clock/math/workspace tools
+- compose toolsets
+- wrap tools with timeout, result limit, logging, and confirmation
+- build an assistant step
+- add context management
 - stream to a terminal
-- stream over SSE
-- retry on rate limits
-- persist history
-- test a loop
+- handle streaming retries
 - switch providers
+- test with a mock provider
 - fan out with `Parallel`
+- connect MCP tools
 - build a repo explainer
 
-Principles:
+### 4. Compelling example app
 
-- recipes should be small
-- recipes should be copy-pasteable
-- recipes should fit naturally into existing Go programs
-- recipes should show the primitive underneath
-- recipes should avoid fake tools when a real local deterministic tool is possible
+**Priority:** high  
+**Status:** next
 
-### 11. One compelling example app
+Add one example that demonstrates practical value beyond toy snippets.
 
-Priority: high. Build this as soon as the `Assistant` block and `workspace edit file` exist — it acts as the integration test for P1.
+Recommended first app:
 
-Problem:
+~~~text
+examples/repo-explainer
+~~~
 
-Small examples demonstrate API shape, but not enough practical value.
+Expected behavior:
 
-Goal:
+1. accept a repository path
+2. sandbox workspace tools to that path
+3. list and read selected files
+4. stream a summary or answer a question
+5. use `Assistant`, `Toolset`, context management, and safe filesystem tools
+6. keep history and execution visible in ordinary Go code
 
-Add one beautiful example app that a Go developer could adapt at work.
-
-Good candidates:
-
-- repo explainer CLI
-- issue triage assistant
-- log summarizer
-- local docs Q&A over files
-- HTTP research assistant with citations
-- Go code review helper
-
-Recommended first choice:
-
-> repo explainer CLI
-
-Why:
-
-- useful to developers immediately
-- showcases filesystem tools
-- can use streaming
-- can use context trimming later
-- demonstrates explicit loop ownership
-- avoids external search/API dependencies
-- easy to run locally
-- naturally shows why safe filesystem sandboxing matters
-
-Possible behavior:
-
-```bash
-go run ./examples/repo-explainer --path .
-```
-
-The app could:
-
-1. list project files
-2. read selected files
-3. summarize architecture
-4. answer a user question
-5. stream output to the terminal
-
-Principles:
-
-- do not make it a toy calculator
-- keep it understandable
-- show composition of primitives
-- keep user control visible
-- include safety boundaries
-
----
+This example should act as an integration test for the practical agent path.
 
 ## P2 — Production helpers that preserve control
 
+P2 adds production-oriented helpers without introducing a runner.
+
 ### 1. Assistant hardening
 
-Priority: high after the basic assistant pattern exists.
+**Priority:** high after P1
 
-Problem:
+Keep `Assistant` thin as features accumulate. It should remain equivalent to context trimming plus `Client.Loop` or `Client.LoopStream`.
 
-Once the practical assistant pattern exists, it needs to remain thin, inspectable, and easy to bypass as production features are added.
+Focus areas:
 
-Goal:
+- clarify hook behavior
+- verify middleware ordering and streaming behavior
+- document desugared assistant steps
+- ensure advanced users can drop to primitives without changing data models
 
-Make sure context management, hooks, streaming, sessions, and tool middleware compose with the assistant step without turning it into a hidden runtime.
+### 2. Sessions without a runner
 
-Principles:
+**Priority:** medium
 
-- assistant helpers should remain desugarable to `ContextManager.Trim` plus `Client.Loop`
-- persistence should stay caller-owned
-- hooks should observe rather than control execution
-- streaming should use explicit callbacks
-- tool policy should live in toolsets and middleware, not hidden assistant behavior
-- advanced users should be able to drop down to primitives without changing data models
+Add boring persistence for conversation history.
 
-### 2. Boring sessions, but no runner
+Possible shape:
 
-Priority: medium.
-
-Problem:
-
-Real applications need conversation history to survive across requests and restarts.
-
-**Two-tier persistence model.**
-
-Persistence is two distinct problems with different solutions:
-
-- **Conversation-level persistence**: save and reload `[]Message`. Because history is append-only and fully JSON-serializable, this maps directly to a `Store` interface. Crash before a step — reload history, resume from the last good state. Human-in-the-loop pause/resume, conversation forking, session sharing: all handled. This covers the 80% case.
-
-- **Durable tool execution**: if the agent crashes *while a tool is executing*, history has a `tool_use` block with no matching `tool_result`. Reloading history and resuming may re-execute a side-effectful tool — file writes, API calls, payments. This is the exactly-once problem. It is addressed separately in P2.3 via a `WithIdempotency` middleware that uses tool-use IDs as idempotency keys.
-
-Goal:
-
-Add a minimal `Session` and `Store` abstraction that remains a transparent wrapper around `[]Message`.
-
-Possible API:
-
-```go
+~~~go
 type Session struct {
-	ID      string
-	History []Message
-	State   map[string]any
+    ID      string
+    History []Message
+    State   map[string]any
 }
 
 type Store interface {
-	Create(ctx context.Context, session *Session) error
-	Get(ctx context.Context, id string) (*Session, error)
-	Update(ctx context.Context, session *Session) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, prefix string, limit int) ([]*Session, error)
+    Create(ctx context.Context, session *Session) error
+    Get(ctx context.Context, id string) (*Session, error)
+    Update(ctx context.Context, session *Session) error
+    Delete(ctx context.Context, id string) error
+    List(ctx context.Context, prefix string, limit int) ([]*Session, error)
 }
-```
+~~~
 
-Built-in stores:
+Likely built-ins:
 
-| Store | Notes |
-|---|---|
-| `MemoryStore` | tests and development |
-| `FileStore` | JSON files, single-instance apps |
+- memory store for tests and development
+- file store for simple local apps
 
 Principles:
 
 - sessions do not call models
 - sessions do not run tools
-- sessions do not trim automatically unless explicitly asked
-- sessions do not introduce a runtime
-- sessions do not require a runner
-- `Session.History` is plain `[]Message`
-- external database stores should live outside the core unless very small
-
-The point is persistence, not orchestration.
-
-A session should be used like this:
-
-```go
-result, err := client.Loop(ctx, system, session.History, tools, dispatch, 5)
-session.History = result.Messages
-```
-
-The core should not add a `Runner` abstraction that owns this flow.
+- sessions do not trim automatically
+- no runner abstraction
+- `Session.History` stays plain `[]Message`
 
 ### 3. Durable tool execution
 
-Priority: medium.
+**Priority:** medium
 
-Problem:
+Conversation persistence does not solve mid-tool-call crashes. Side-effectful tools need opt-in idempotency.
 
-Conversation persistence (saving and reloading `[]Message`) handles the common case cleanly, but it does not handle mid-tool-call crashes.
-
-If an agent crashes while a tool is executing, history contains a `tool_use` block with no matching `tool_result`. On reload, you face a genuine ambiguity: did the tool finish? Did it partially complete? Re-executing a side-effectful tool — a file write, an API call, a database mutation — may cause double execution. With concurrent tool execution this is sharper: if three tools run in parallel and the process dies after two complete, history does not record which ones finished.
-
-Tool-use IDs (already stable and unique in the message format) can serve as idempotency keys.
-
-Goal:
-
-Provide a `WithIdempotency` middleware and a minimal `ToolResultStore` interface. Before executing a tool, the middleware checks the store; if a result for that tool-use ID already exists, it returns the cached result without re-executing. After executing, it persists the result to the store. On crash-resume, any tool that completed before the crash returns its cached result; any tool that did not complete re-executes cleanly.
-
-Possible API:
+Possible shape:
 
 ~~~go
 type ToolResultStore interface {
@@ -1125,407 +237,160 @@ type ToolResultStore interface {
 func WithIdempotency(store ToolResultStore) Middleware
 ~~~
 
-Resume pattern:
-
-~~~go
-// Load history (may contain unmatched tool_use blocks from a crash).
-history, _ := convStore.Load(ctx, sessionID)
-
-// Completed tools return cached results; incomplete ones re-execute.
-toolset = toolset.Wrap(agent.WithIdempotency(idempotencyStore))
-
-result, err := a.Step(ctx, history)
-~~~
-
-Built-in stores: in-memory (tests and development), file-backed (single-instance apps). External stores (Redis, SQL) are left to callers.
-
 Principles:
 
-- tool-use IDs are already stable in the message format — no new ID scheme needed
-- the middleware is opt-in; most apps that use idempotent tools or short-lived processes do not need it
-- the store interface is minimal and implementation-agnostic
-- this gets you to "no duplicate execution at the agent level after crash-resume"
-- it does not guarantee exactly-once delivery across all infrastructure — external state changes still require tool-level idempotency or rollback; document the boundary clearly
-- the middleware composes with logging, confirmation, and timeout wrappers in the normal way
+- use existing tool-use IDs as idempotency keys
+- middleware is opt-in
+- document the boundary: this prevents duplicate agent-level execution after crash-resume, not universal exactly-once delivery
+- compose with confirmation, logging, timeout, and result-limit middleware
 
-### 4. Observability hooks
+### 4. Observability hooks and OpenTelemetry adapter
 
-Priority: medium.
+**Priority:** medium
 
-Problem:
+Expand hooks from assistant-level observation toward request, response, tool call, tool result, latency, and error events.
 
-Users need visibility into requests, responses, tool calls, tool results, latency, and errors.
+Possible future hooks:
 
-Goal:
-
-Add optional hooks as a side channel for logging/tracing, not as a lifecycle framework.
-
-Possible API:
-
-```go
+~~~go
 type Hooks struct {
-	OnRequest    func(ctx context.Context, iter int, req ProviderRequest)
-	OnResponse   func(ctx context.Context, iter int, resp ProviderResponse, dur time.Duration)
-	OnToolCall   func(ctx context.Context, iter int, name string, input json.RawMessage)
-	OnToolResult func(ctx context.Context, iter int, name string, result ToolResult, dur time.Duration)
-	OnError      func(ctx context.Context, iter int, err error)
+    OnRequest    func(ctx context.Context, iter int, req ProviderRequest)
+    OnResponse   func(ctx context.Context, iter int, resp ProviderResponse, dur time.Duration)
+    OnToolCall   func(ctx context.Context, iter int, name string, input json.RawMessage)
+    OnToolResult func(ctx context.Context, iter int, name string, result ToolResult, dur time.Duration)
+    OnError      func(ctx context.Context, iter int, err error)
 }
-```
-
-**OpenTelemetry adapter.**
-
-The hooks above emit the right events; what is missing is a thin adapter that wires them to OpenTelemetry spans. Provide an `agent/otel` sub-package:
-
-~~~go
-// otel.HooksFromTracer returns an agent.Hooks that creates OTel spans
-// around each step and, once per-tool-call hooks exist, around each tool call.
-func HooksFromTracer(tracer trace.Tracer) agent.Hooks
 ~~~
 
-With this adapter, Jaeger, Honeycomb, Datadog, and any other OTel-compatible backend work out of the box. The adapter is a translation layer over the hooks that already exist — no changes to the core package are needed.
-
-Principles:
-
-- zero value means no hooks
-- hooks are optional
-- hooks should not control the loop
-- hooks should not become middleware
-- hooks should not hide execution flow
-- callbacks should be documented as synchronous or asynchronous
-- the OTel adapter is a separate sub-package with its own dependency on `go.opentelemetry.io/otel`; the core `agent` package has no OTel dependency
+Add an `agent/otel` subpackage for OpenTelemetry translation so the core package does not depend on OTel.
 
 ### 5. Extended model configuration
 
-Priority: medium.
+**Priority:** medium
 
-Problem:
+Thread optional generation controls through `ProviderRequest`.
 
-`Config` exposes only basic model settings. Real usage often needs generation controls.
+Candidates:
 
-Goal:
-
-Thread optional generation parameters through `ProviderRequest`.
-
-Possible fields:
-
-```go
-type Config struct {
-	Provider   Provider
-	Model      string
-	MaxTokens  int
-	Retry      RetryConfig
-	Hooks      Hooks
-
-	Temperature   float64
-	TopP          float64
-	StopSequences []string
-}
-```
+- temperature
+- top-p
+- stop sequences
 
 Principles:
 
 - zero values preserve provider defaults
-- provider-specific unsupported fields are ignored or documented
-- avoid turning `Config` into a giant vendor-specific surface
-- escape hatches can live in provider configs if needed
-- keep the common case short
-- allow advanced users to take on complexity explicitly
+- avoid a large vendor-specific config surface
+- provider-specific escape hatches belong in provider configs
 
 ### 6. Testing helpers
 
-Priority: medium.
+**Priority:** medium
 
-Problem:
+The `Provider` interface is already the main testing seam. Add tiny helpers for deterministic tests.
 
-The provider interface is already a good testing seam, but users will benefit from standard helpers.
+Candidates:
 
-Goal:
-
-Add small utilities for deterministic tests.
-
-Possible helpers:
-
-```go
-provider := agent.NewMockProvider(
-	agent.ProviderResponse{
-		Content: []agent.ContentBlock{
-			{Type: agent.TypeText, Text: "hello"},
-		},
-		StopReason: "end_turn",
-	},
-)
-```
-
-Or a scripted provider:
-
-```go
-provider := agent.ScriptedProvider{
-	Responses: []agent.ProviderResponse{...},
-}
-```
-
-Principles:
-
-- helpers should be tiny
-- helpers should model provider contracts
-- do not assert exact LLM text in library examples
-- encourage testing history shape, tool calls, errors, and usage
+- static mock provider
+- scripted provider
+- assertions for history shape, tool calls, usage, and typed errors
 
 ### 7. ADK comparison doc
 
-Priority: medium.
+**Priority:** medium
 
-Problem:
-
-`gocode` should be easier than Google ADK, but that difference should be explained clearly and fairly without turning the README into a comparison essay.
-
-Goal:
-
-Add a focused comparison document that helps users understand the tradeoff.
+Add a focused, fair comparison that explains when `gocode` is a better fit and when ADK-style systems are useful.
 
 Possible file:
 
-```text
+~~~text
 COMPARISON.md
-```
+~~~
 
-Possible structure:
-
-| Concern | Google ADK-style approach | `gocode` approach |
-|---|---|---|
-| Agent definition | Framework objects | Prompts, `Client`, `Ask`, and `Loop` |
-| Tools | Framework tool abstractions | `Tool` plus `ToolFunc` |
-| Context | ADK context objects | `context.Context` plus closures |
-| Session | Session service | Optional `Session` data plus `Store` |
-| Runner | Framework runner | Your `main`, HTTP handler, CLI command, worker, or goroutine |
-| Memory | Built-in service concepts | Explicit interfaces or separate packages |
-| Deployment | Platform-oriented | Bring your own deployment |
-| Debugging | Follow framework lifecycle | Inspect messages, tools, dispatch, and loop results |
-| Testing | Mock framework components | Mock `Provider`, call public APIs |
-
-Principles:
-
-- be fair, not combative
-- explain when ADK is a good fit
-- explain when `gocode` is a better fit
-- focus on concepts users must learn
-- emphasize ordinary Go code
-- emphasize visible control flow
-- do not frame the goal as feature parity
+Keep the README short and avoid turning it into a comparison essay.
 
 ### 8. HTTP/SSE service example
 
-Priority: medium.
+**Priority:** medium
 
-Problem:
+Add a small `net/http` example that streams model output over Server-Sent Events.
 
-Many Go users are building services, not just CLIs. The examples should show that `gocode` fits naturally inside ordinary `net/http` programs without requiring a framework runtime.
+Expected shape:
 
-Goal:
+1. handler receives a user message
+2. handler loads history
+3. handler appends the user turn
+4. handler calls `AskStream` or `Assistant.StepStream`
+5. handler writes SSE events
+6. handler stores updated history
 
-Add a small service example that streams model output over Server-Sent Events.
-
-Possible example:
-
-```text
-examples/http-sse-chat
-```
-
-The example should show:
-
-- a normal `net/http` server
-- explicit request parsing
-- explicit history loading/saving
-- `AskStream` or `LoopStream`
-- SSE response writing
-- no web framework requirement
-- no hidden session runtime
-- no runner abstraction
-
-Possible flow:
-
-1. HTTP handler receives a user message.
-2. Handler loads or creates history.
-3. Handler appends the user message.
-4. Handler calls `AskStream` or `LoopStream`.
-5. Handler writes deltas as SSE events.
-6. Handler stores the updated history.
-
-Principles:
-
-- copy-pasteable into a real service
-- ordinary Go HTTP primitives
-- visible error handling
-- visible history management
-- no global state unless clearly called out as demo-only
-- no framework-owned lifecycle
-
----
+No web framework, runner, or hidden session lifecycle.
 
 ## P3 — Useful, but design carefully
 
 ### 1. Evaluation helpers
 
-Priority: medium-low.
+**Priority:** medium-low
 
-Goal:
-
-Help users regression-test agent behavior.
-
-Possible API:
-
-```go
-type EvalCase struct {
-	Name     string
-	Input    []Message
-	Tools    []Tool
-	Dispatch map[string]ToolFunc
-	Assert   func(t *testing.T, result LoopResult)
-}
-```
-
-Principles:
-
-- evaluation should be a testing helper, not a hosted platform
-- no hidden model management
-- no database requirement
-- user owns assertions
+Small test helpers for regression-testing agent behavior. Avoid hosted-platform concepts, hidden model management, or required databases.
 
 ### 2. Lightweight multi-agent composition
 
-Priority: low.
+**Priority:** low
 
-Goal:
+Maybe add functions for routing, critique, fan-out/fan-in, or delegation. Keep them outside the core unless the shape is obviously just functions over existing primitives.
 
-Maybe provide helpers for patterns like routing, fan-out/fan-in, critique, or delegation.
-
-Risk:
-
-This can easily become framework territory.
-
-Principles:
-
-- no graph runtime in core
-- no hidden scheduler
-- no hidden state
-- no autonomous agent registry
-- no opaque lifecycle
-- helpers should just be functions over `Client`, `Message`, `Tool`, and `LoopResult`
-- strongly consider a separate package
-
-The library already has enough primitives for users to build many of these patterns themselves.
+Avoid graph runtimes, autonomous registries, hidden schedulers, and opaque lifecycle management.
 
 ### 3. Cross-session memory
 
-Priority: low.
+**Priority:** low / likely separate package
 
-Goal:
+Search across prior sessions or external knowledge pulls in embeddings, vector stores, chunking, ranking, and persistence. Keep this separate from the core loop and session model.
 
-Allow searching across past sessions or external knowledge.
+## Explicit non-goals
 
-Risk:
+The core library should not become:
 
-This pulls in embeddings, vector stores, chunking, ranking, and persistence concerns.
+- a graph executor
+- a visual workflow builder
+- a no-code agent configuration system
+- a managed deployment platform
+- a hidden scheduler
+- a vector database
+- a global tool registry
+- an autonomous background-agent runtime
+- a framework-owned runner
+- an ADK-style application object graph
 
-Principles:
-
-- likely separate package
-- no built-in vector database in core
-- integrate through interfaces
-- keep `Session` boring
-- do not create hidden memory behavior inside `Loop`
-
----
-
-## Deferred or non-goals
-
-These are intentionally out of scope for the core library:
-
-- full orchestration frameworks
-- graph executors
-- hidden schedulers
-- visual workflow builders
-- no-code agent configuration
-- managed deployment
-- built-in HTTP server scaffolding
-- built-in vector database
-- global tool registries
-- implicit persistence
-- autonomous background agents
-- opaque agent-to-agent runtimes
-- core `Runner` abstractions that own execution flow
-- required custom context objects for normal tool use
-- ADK-style application object graphs
-
-You can build many of these things on top of `gocode`, but the core library should remain small and composable.
-
----
+Higher-level systems can be built on top of `gocode`. The core should remain small, explicit, composable, and easy to reason about.
 
 ## Implementation order
 
-| Order | Item | Priority | Status |
-|---|---|---|---|
-| 1 | Provider setup helpers | P1 | Done |
-| 2 | Parallel tool execution | P1 | Done |
-| 3 | Safe pre-built tools (incl. `workspace edit file`) | P1 | Done |
-| 4 | Native MCP support | P1 | Done |
-| 5 | Native skills support | P1 | Next |
-| 6 | Tool bindings/toolsets/dispatch helpers (incl. `WithConfirmation`) | P1 | Done |
-| 7 | Explicit context management | P1 | Done |
-| 8 | Basic, extensible agent block (P1 centerpiece) | P1 | Done |
-| 9 | Streaming retry semantics | P1 | Next |
-| 10 | Compelling example app (repo explainer) | P1 | Next |
-| 11 | Recipes documentation | P1 | Next |
-| 12 | Assistant hardening | P2 | Planned |
-| 13 | Boring sessions, but no runner | P2 | Planned |
-| 14 | Durable tool execution (`WithIdempotency`) | P2 | Planned |
-| 15 | Observability hooks + OpenTelemetry adapter | P2 | Planned |
-| 16 | Extended model configuration | P2 | Planned |
-| 17 | Testing helpers | P2 | Planned |
-| 18 | ADK comparison doc | P2 | Planned |
-| 19 | HTTP/SSE service example | P2 | Planned |
-| 20 | Evaluation helpers | P3 | Future |
-| 21 | Lightweight multi-agent composition | P3 | Future / cautious |
-| 22 | Cross-session memory | P3 | Future / likely separate package |
+| Order | Item | Status |
+|---|---|---|
+| 1 | Native skills support | Next |
+| 2 | Streaming retry helper and docs | Next |
+| 3 | Recipe documentation | Next |
+| 4 | Repo explainer example | Next |
+| 5 | Assistant hardening | Planned |
+| 6 | Session/store helpers | Planned |
+| 7 | Durable tool execution middleware | Planned |
+| 8 | Observability hooks and OTel adapter | Planned |
+| 9 | Extended model configuration | Planned |
+| 10 | Testing helpers | Planned |
+| 11 | ADK comparison doc | Planned |
+| 12 | HTTP/SSE service example | Planned |
+| 13 | Evaluation helpers | Future |
+| 14 | Lightweight multi-agent helpers | Future / cautious |
+| 15 | Cross-session memory | Future / likely separate package |
 
----
+## Next focus
 
-## Future focus
+The next coherent milestone is:
 
-The core primitives are now in place. The next phase should make those primitives easier to assemble into useful applications without changing the execution model.
+1. skills as transparent bundles
+2. streaming retry helper/documentation
+3. recipes that show the practical path
+4. repo explainer example that ties together `Assistant`, `Toolset`, context management, workspace tools, and streaming
 
-The highest-leverage work is:
-
-1. parallel tool execution — correctness fix that everything builds on
-2. safe pre-built tools, including `workspace edit file` as the minimum mutation primitive
-3. native MCP and skills support for progressive prompt discovery and skill composition
-4. toolsets, dispatch helpers, and `WithConfirmation` as the human-in-the-loop primitive
-5. explicit context management
-6. a basic, extensible `Assistant` block — the P1 centerpiece that assembles all the above
-7. streaming retry semantics locked down before P2 multiplies the surface
-8. one compelling real example app that acts as the integration test for P1
-9. small, copy-pasteable recipes
-
-Production helpers (P2) close the remaining gaps:
-
-- **Sessions + Store**: conversation-level persistence; history is the state, the store is the sink
-- **Durable tool execution**: `WithIdempotency` + `ToolResultStore` for crash-resume without double execution
-- **OpenTelemetry adapter**: `agent/otel` wires existing hooks to spans; no OTel dependency in core
-
-Production helpers should follow the same rule:
-
-> Make the common path easier while keeping execution visible.
-
-That means context management, sessions, hooks, testing helpers, evaluation helpers, and service examples should all preserve the central promise:
-
-> You own the data. You own the tools. You own the loop.
-
-The design north star is:
-
-> Easy things easy. Hard things possible. Nothing hidden.
-
-Or, stated relative to ADK:
-
-> Simple tasks should not pay the full framework tax. Complex tasks should not require fighting the abstraction.
-
-It should be easy to do the easy stuff. It should also allow as much complexity as users want to take on — but the complexity should remain explicit, elegant, and built from ordinary Go pieces.
+That milestone should make `gocode` feel complete for local, practical agents while preserving the same simple foundation: ordinary Go code, visible data flow, explicit control.

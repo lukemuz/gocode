@@ -1,133 +1,49 @@
 # gocode
 
-`gocode` is a Go library for building LLM-powered software that scales from one function call to serious agent systems without forcing the serious-agent shape onto the first function call.
+`gocode` is a small Go library for LLM calls, tools, and agent loops.
 
-The project is built around a simple idea:
+> Plain data. Plain functions. No framework magic.
 
-> Make easy things easy without making advanced things harder.
+It scales from one model call to practical tool-using assistants without forcing a framework-shaped runtime onto simple programs.
 
-You get small, inspectable primitives:
-
-- `Client` for model calls
-- `Provider` for Anthropic, OpenAI, OpenRouter, or your own backend
-- `Message` and `ContentBlock` as plain conversation data
-- `Tool` and `ToolFunc` for model-callable functions
-- `Ask` for one model call
-- `Loop` for tool-using agent loops
-- `Parallel` for fan-out/fan-in workflows
-- streaming, retries, typed errors, and usage tracking
-
-You also get progressively higher-level assembly helpers where they reduce real boilerplate without taking over your application.
-
-The core promise is:
+The core promise:
 
 > You own the data. You own the tools. You own the loop.
 
-`gocode` does **not** make simple tasks pay a framework tax. One model call should stay one model call. A basic tool-using assistant should be easy to assemble. A complex production agent should remain explicit, inspectable, and customizable.
+`gocode` gives you:
 
-Requires Go 1.21+. No external dependencies.
+- model calls with `Ask` and `AskStream`
+- tool loops with `Loop` and `LoopStream`
+- plain `[]Message` conversation history
+- normal Go functions as tools
+- provider implementations for Anthropic, OpenAI, and OpenRouter
+- retries, typed errors, streaming, usage tracking, and tests
+- safe built-in tools, toolsets, middleware, context management, MCP, and a thin `Assistant` block
 
-See **[VISION.md](VISION.md)** for the longer product philosophy.
+Requires Go 1.21+. No external dependencies in the core package.
 
----
+## When to use it
 
-## Why gocode?
-
-Many agent frameworks optimize for the fully-loaded case.
-
-Once you accept their application model, hard things can become relatively easy: agents, runners, sessions, tools, memory, callbacks, artifacts, and lifecycle hooks all have a place.
-
-The tradeoff is that simple things often require the same conceptual setup as complex things.
-
-`gocode` aims for a smoother complexity curve:
-
-| Task size | `gocode` experience |
-|---|---|
-| Simple task | Tiny setup |
-| Medium task | Ergonomic assembly |
-| Hard task | Explicit composition |
-
-Use it when you want:
+Use `gocode` when you want:
 
 - one-off LLM calls without ceremony
 - tool use without a heavyweight runtime
-- practical agent patterns without hidden control flow
-- transparent conversation history
-- explicit context management
+- practical assistants with visible control flow
+- explicit conversation history and context management
 - easy testing through interfaces
-- streaming output for CLIs, coding tools, services, or web UIs
-- retry behavior and typed errors suitable for production
-- APIs that are easy for humans and coding agents to inspect and modify
+- Go-native code that is easy for humans and coding agents to inspect
 
-`gocode` is not anti-convenience. It is anti-trap.
+The project is not anti-convenience. It is anti-trap: helpers should compress boilerplate without hiding model calls, tool execution, memory mutation, persistence, or application lifecycle.
 
-Good abstractions should compress boilerplate, expose the primitives underneath, and be easy to bypass. Bad abstractions hide model calls, tool execution, memory mutation, persistence, or application lifecycle.
+For the longer philosophy, see [`VISION.md`](VISION.md). For future work, see [`ROADMAP.md`](ROADMAP.md).
 
-The goal is:
-
-> Batteries included, control retained.
-
----
-
-## Quickstart
-
-See **[QUICKSTART.md](QUICKSTART.md)** for the fastest path.
-
-The quickstart now focuses on:
-
-1. making one model call with `Ask`
-2. adding one simple tool with `Loop`
-3. understanding the core shape without front-loading production details
-
-If you want the short version:
-
-~~~go
-provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
-	APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-})
-if err != nil {
-	log.Fatal(err)
-}
-
-client, err := agent.New(agent.Config{
-	Provider:  provider,
-	Model:     agent.ModelSonnet,
-	MaxTokens: 1024,
-})
-if err != nil {
-	log.Fatal(err)
-}
-
-history := []agent.Message{
-	agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
-}
-
-reply, err := client.Ask(context.Background(), "You are concise.", history)
-if err != nil {
-	log.Fatal(err)
-}
-
-fmt.Println(agent.TextContent(reply))
-~~~
-
-That is the basic model:
-
-- build a provider
-- build a client
-- pass plain message history
-- get a plain message back
-
-No hidden session. No framework runtime.
-
----
-
-## Installation
+## Install
 
 ~~~bash
 go get github.com/lukemuz/gocode/agent
 ~~~
 
-Set whichever API key matches your provider:
+Set an API key for the provider you want to use:
 
 ~~~bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -135,64 +51,66 @@ export OPENAI_API_KEY=sk-...
 export OPENROUTER_API_KEY=sk-or-...
 ~~~
 
----
+## Quickstart
 
-## The building blocks
+For the guided first-run path, see [`QUICKSTART.md`](QUICKSTART.md).
+
+The smallest useful call looks like this:
+
+~~~go
+client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+if err != nil {
+    log.Fatal(err)
+}
+
+history := []agent.Message{
+    agent.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
+}
+
+reply, err := client.Ask(context.Background(), "You are concise.", history)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(agent.TextContent(reply))
+~~~
+
+No hidden session. No runner. `history` is just data.
+
+## Core building blocks
 
 ### `Provider`
 
 A `Provider` translates between `gocode`'s canonical data model and an LLM API.
 
-Anthropic, OpenAI, and OpenRouter providers are included. You can implement your own provider for any backend.
-
 ~~~go
 type Provider interface {
-	Call(ctx context.Context, req ProviderRequest) (ProviderResponse, error)
-	Stream(ctx context.Context, req ProviderRequest, onDelta func(ContentBlock)) (ProviderResponse, error)
+    Call(ctx context.Context, req ProviderRequest) (ProviderResponse, error)
+    Stream(ctx context.Context, req ProviderRequest, onDelta func(ContentBlock)) (ProviderResponse, error)
 }
 ~~~
 
-`ProviderRequest` and `ProviderResponse` are the shared internal contract:
+Included providers:
 
-~~~go
-type ProviderRequest struct {
-	Model     string
-	MaxTokens int
-	System    string
-	Messages  []Message
-	Tools     []Tool
-}
+- Anthropic
+- OpenAI
+- OpenRouter
 
-type ProviderResponse struct {
-	Content    []ContentBlock
-	StopReason string
-	Usage      Usage
-}
-~~~
-
-Every provider maps its wire format to these types.
-
-Your application code does not need to change when you switch providers.
-
----
+You can implement this interface for any backend.
 
 ### `Client`
 
-A `Client` knows which provider, model, token limit, and retry policy to use.
+A `Client` holds provider, model, token limit, and retry configuration. It does not store conversation state.
 
 ~~~go
 client, err := agent.New(agent.Config{
-	Provider:  provider,
-	Model:     agent.ModelSonnet,
-	MaxTokens: 1024,
+    Provider:  provider,
+    Model:     agent.ModelSonnet,
+    MaxTokens: 4096,
 })
 ~~~
 
-`Client` does not store conversation state. Every call receives a `[]Message`.
-
-That makes one client safe to reuse across many conversations, HTTP requests, jobs, or goroutines.
-
----
+The same client can be reused across conversations, HTTP requests, jobs, and goroutines.
 
 ### `Message`
 
@@ -200,579 +118,341 @@ Conversation history is plain data:
 
 ~~~go
 history := []agent.Message{
-	agent.NewUserMessage("Hello"),
+    agent.NewUserMessage("Hello"),
 }
 ~~~
 
-A `Message` contains a role and a list of content blocks:
+Append replies yourself when you want to continue:
 
 ~~~go
-type Message struct {
-	Role    string
-	Content []ContentBlock
-}
+reply, err := client.Ask(ctx, system, history)
+history = append(history, reply)
+history = append(history, agent.NewUserMessage("Tell me more."))
 ~~~
 
-Common content block types include:
-
-| Type | Meaning |
-|---|---|
-| `text` | Assistant or user text |
-| `tool_use` | A model-requested tool call |
-| `tool_result` | The result of a tool function |
-
-Helpers like `NewUserMessage`, `NewToolResultMessage`, and `TextContent` cover common cases.
-
----
-
-### `Tool`
+### `Tool` and `ToolFunc`
 
 A tool has two parts:
 
-1. the definition the model sees
-2. the Go function your program runs
-
-Definition (using the new schema helpers):
+1. a model-facing definition
+2. a Go function your program runs
 
 ~~~go
-readFile, err := agent.NewTool("read_file", "Read a file.", agent.Object(
-	agent.String("path", "Path to read", agent.Required()),
-))
-~~~
-
-Implementation:
-
-~~~go
-dispatch := map[string]agent.ToolFunc{
-	"read_file": func(ctx context.Context, input json.RawMessage) (string, error) {
-		var params struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(input, &params); err != nil {
-			return "", err
-		}
-
-		data, err := os.ReadFile(params.Path)
-		if err != nil {
-			return "", err
-		}
-
-		return string(data), nil
-	},
-}
-~~~
-
-This is intentionally transparent:
-
-- the model sees the exact schema you wrote
-- your function receives the exact JSON the model produced
-- dispatch is a normal Go map
-- there is no hidden registry or runtime
-
-The low-level path is explicit by design.
-
-At the same time, explicit does not have to mean tedious. Schema builders (`Object`, `String`, `Integer`, `Required`, etc.), `TypedToolFunc`, and `JSONResult` are now implemented to reduce boilerplate while preserving the explicit design. Pre-built tools and dispatch helpers are next.
-
----
-
-## Three tiers
-
-`gocode` is designed around three levels of complexity. Use the smallest one that solves your problem.
-
----
-
-### Tier 1 — One model call
-
-Use `Ask` when you want one response from the model.
-
-~~~go
-history := []agent.Message{
-	agent.NewUserMessage("What is the capital of France?"),
-}
-
-reply, err := client.Ask(ctx, "", history)
-if err != nil {
-	log.Fatal(err)
-}
-
-fmt.Println(agent.TextContent(reply))
-~~~
-
-`Ask` does not mutate your history. If you want to continue the conversation, append the reply yourself:
-
-~~~go
-history = append(history, reply)
-history = append(history, agent.NewUserMessage("What is its population?"))
-
-reply, err = client.Ask(ctx, "", history)
-~~~
-
-You own the conversation.
-
----
-
-### Tier 2 — Parallel steps
-
-Use `Parallel` for independent fan-out work.
-
-~~~go
-results := agent.Parallel(ctx,
-	func(ctx context.Context) (string, error) {
-		return ask(ctx, client, "Summarize Rome in two sentences.")
-	},
-	func(ctx context.Context) (string, error) {
-		return ask(ctx, client, "Summarize Athens in two sentences.")
-	},
+tool, fn, err := agent.NewTypedTool(
+    "calculator",
+    "Do basic arithmetic.",
+    agent.Object(
+        agent.String("operation", "add, subtract, multiply, or divide", agent.Required()),
+        agent.Number("a", "First number", agent.Required()),
+        agent.Number("b", "Second number", agent.Required()),
+    ),
+    func(ctx context.Context, in CalculatorInput) (string, error) {
+        return calculate(in)
+    },
 )
 ~~~
 
-Results are index-aligned with the input steps:
+Tools still compile down to ordinary values:
 
 ~~~go
-for i, r := range results {
-	if r.Err != nil {
-		log.Fatalf("step %d: %v", i, r.Err)
-	}
-}
+tools := []agent.Tool{tool}
+dispatch := map[string]agent.ToolFunc{tool.Name: fn}
 ~~~
 
-Then compose the outputs however you want:
+There is no hidden registry.
+
+## Three usage tiers
+
+### Tier 1: one model call
+
+Use `Ask` when you want one response.
 
 ~~~go
-comparison, err := ask(ctx, client, fmt.Sprintf(
-	"Compare these:\n\nRome: %s\n\nAthens: %s",
-	results[0].Value,
-	results[1].Value,
-))
+reply, err := client.Ask(ctx, system, history)
 ~~~
 
-`Parallel` uses goroutines. It is a helper, not a scheduler.
+### Tier 2: parallel steps
 
----
+Use `Parallel` for independent fan-out/fan-in work.
 
-### Tier 3 — Tool loop
+~~~go
+results := agent.Parallel(ctx,
+    func(ctx context.Context) (string, error) { return summarize(ctx, client, "Rome") },
+    func(ctx context.Context) (string, error) { return summarize(ctx, client, "Athens") },
+)
+~~~
+
+It uses goroutines. It is a helper, not a scheduler.
+
+### Tier 3: tool loop
 
 Use `Loop` when the model can call tools.
 
 ~~~go
-result, err := client.Loop(
-	ctx,
-	"You are a helpful assistant with filesystem access.",
-	history,
-	[]agent.Tool{readFile},
-	dispatch,
-	5,
-)
-if err != nil {
-	log.Fatal(err)
-}
-
-last := result.Messages[len(result.Messages)-1]
-fmt.Println(agent.TextContent(last))
-~~~
-
-Conceptually, `Loop` does this:
-
-~~~text
-1. Send messages and tools to the model.
-2. Receive the model response.
-3. If the model is done, return the full history.
-4. If the model requested tools, run your ToolFunc values.
-5. Append tool results to history.
-6. Repeat until done or max iterations is reached.
-~~~
-
-There is no hidden graph, event bus, checkpoint manager, or autonomous runtime.
-
-It is the common tool loop you would otherwise write yourself.
-
----
-
-## Streaming
-
-Use `AskStream` when you want tokens as they arrive:
-
-~~~go
-_, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) {
-	if delta.Type == agent.TypeText {
-		fmt.Print(delta.Text)
-	}
-})
-~~~
-
-Use `LoopStream` for streaming tool-using loops:
-
-~~~go
-result, err := client.LoopStream(
-	ctx,
-	system,
-	history,
-	tools,
-	dispatch,
-	5,
-	func(delta agent.ContentBlock) {
-		if delta.Type == agent.TypeText {
-			fmt.Print(delta.Text)
-		}
-		if delta.Type == agent.TypeToolUse && delta.Name != "" {
-			fmt.Printf("\n[calling tool: %s]\n", delta.Name)
-		}
-	},
-	func(results []agent.ToolResult) {
-		for _, r := range results {
-			if r.IsError {
-				fmt.Printf("[tool error] %s\n", r.Content)
-			} else {
-				fmt.Printf("[tool result] %s\n", r.Content)
-			}
-		}
-	},
-)
-~~~
-
-Streaming callbacks fire synchronously as data arrives.
-
-Both streaming methods still return the final complete `Message` or `LoopResult`.
-
----
-
-## Tools: explicit core, easier assembly
-The core tool API remains low-level and fully inspectable:
-
-- `InputSchema` + `NewTool(...)`
-- `ToolFunc` receives `json.RawMessage`
-- dispatch is a plain `map[string]ToolFunc`
-
-`TypedToolFunc`, `JSONResult`, and the schema builders (`Object`/`String`/`Required`/etc.) are now implemented to reduce boilerplate while preserving the explicit design.
-
-```go
-type CalculatorInput struct {
-	Operation string  `json:"operation"`
-	A         float64 `json:"a"`
-	B         float64 `json:"b"`
-}
-
-fn := agent.TypedToolFunc(func(ctx context.Context, in CalculatorInput) (string, error) {
-	switch in.Operation {
-	case "add":
-		return fmt.Sprintf("%f", in.A+in.B), nil
-	// ...
-	default:
-		return "", fmt.Errorf("unknown operation: %s", in.Operation)
-	}
-})
-
-// Use in dispatch map; pair with JSONResult for structured output:
-return agent.JSONResult(map[string]any{"result": 42})
-```
-
-See `agent/tool.go` for `TypedToolFunc`, `JSONResult`, `Object`, `String`, `Required` and the other schema helpers. Pre-built tools and dispatch helpers are next.
-
-These helpers compile down to the primitives and follow "Lego blocks, not a framework."
-
----
-
-## Planned pre-built tools
-
-Pre-built tools are part of the vision, not a departure from it.
-
-The goal is a small library of safe, boring, opt-in tools that users can inspect, modify, or replace.
-
-Likely starting points:
-
-- current time
-- filesystem read/list with root sandboxing
-- HTTP GET/POST with allowlists
-- JSON fetch
-- shell command with explicit opt-in and timeouts
-- web search adapter interfaces
-- basic math/calculator
-- maybe SQL helpers with strong caveats
-
-The safety rule is simple:
-
-> A pre-built tool should be explicit to enable, obvious to inspect, and conservative by default.
-
-For example, filesystem tools should prefer sandboxed roots. HTTP tools should support allowlists and timeouts. Shell execution should be visibly dangerous and require explicit configuration.
-
-Pre-built tools should make examples and real applications faster to assemble without turning `gocode` into a framework.
-
----
-
-## Error handling
-
-`gocode` uses typed errors that work with `errors.Is` and `errors.As`.
-
-Common cases:
-
-~~~go
-var apiErr *agent.APIError
-if errors.As(err, &apiErr) {
-	fmt.Println(apiErr.StatusCode, apiErr.Message)
-}
-
-if errors.Is(err, agent.ErrMissingTool) {
-	// The model requested a tool that was not present in dispatch.
-}
-
-var loopErr *agent.LoopError
-if errors.As(err, &loopErr) {
-	fmt.Printf("loop failed at iteration %d: %v\n", loopErr.Iter, loopErr.Cause)
-}
-
-var retryErr *agent.RetryExhaustedError
-if errors.As(err, &retryErr) {
-	fmt.Printf("retries exhausted after %d attempts: %v\n", retryErr.Attempts, retryErr.Cause)
-}
-
-if errors.Is(err, agent.ErrMaxIter) {
-	// The loop hit its iteration budget.
-}
-~~~
-
-Tool errors are soft by default.
-
-If a `ToolFunc` returns an error, the error is fed back to the model as a tool result with `IsError: true`. The model can retry, ask for clarification, or explain the failure.
-
-A missing tool is different. If the model asks for a tool that is not in your dispatch map, `Loop` returns `ErrMissingTool`. That is treated as a programming/configuration error.
-
----
-
-## Retries
-
-Retries are built in for transient failures such as rate limits, temporary network errors, and 5xx responses.
-
-The zero value enables sensible defaults.
-
-~~~go
-client, err := agent.New(agent.Config{
-	Provider:  provider,
-	Model:     agent.ModelSonnet,
-	MaxTokens: 4096,
-	Retry: agent.RetryConfig{
-		MaxRetries:  5,
-		InitialWait: time.Second,
-		MaxWait:     30 * time.Second,
-	},
-})
-~~~
-
-Set `Disabled: true` to disable retries.
-
-Retries do not change the programming model. If retries are exhausted, you get a typed `RetryExhaustedError`.
-
----
-
-## Conversation history
-
-`Client` holds no conversation state.
-
-Every call receives a history slice. Every loop result returns an updated history slice.
-
-~~~go
-history := []agent.Message{
-	agent.NewUserMessage("Hello"),
-}
-
-reply, err := client.Ask(ctx, "", history)
-if err != nil {
-	log.Fatal(err)
-}
-
-history = append(history, reply)
-history = append(history, agent.NewUserMessage("Tell me more."))
-
-reply, err = client.Ask(ctx, "", history)
-~~~
-
-`Loop` follows the same idea:
-
-~~~go
 result, err := client.Loop(ctx, system, history, tools, dispatch, 5)
 if err != nil {
-	log.Fatal(err)
+    log.Fatal(err)
 }
 
 history = result.Messages
 ~~~
 
-You can store history in memory, a database, a file, an HTTP session, or your own domain model.
+`Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit is reached.
 
-Future session helpers should remain boring wrappers around this same plain `[]Message` data.
+Multiple tool calls requested in the same model turn run concurrently and are returned to the model in the original order.
 
----
+## Practical assembly
+
+The primitive APIs remain available, but common agent assembly has helpers.
+
+### Toolsets and middleware
+
+`Toolset` bundles tool definitions with their implementations and metadata.
+
+~~~go
+toolset, err := agent.Join(clockTool.Toolset(), workspaceToolset)
+if err != nil {
+    log.Fatal(err)
+}
+
+toolset = toolset.Wrap(
+    agent.WithTimeout(5*time.Second),
+    agent.WithResultLimit(20_000),
+    agent.WithConfirmation(confirm),
+)
+
+result, err := client.Loop(ctx, system, history, toolset.Tools(), toolset.Dispatch(), 10)
+~~~
+
+Available middleware:
+
+- `WithTimeout`
+- `WithResultLimit`
+- `WithLogging`
+- `WithPanicRecovery`
+- `WithConfirmation`
+
+Metadata is advisory and inspectable. Your application decides what policy to enforce.
+
+### Context management
+
+`ContextManager` trims history explicitly before a call or assistant step.
+
+~~~go
+cm := agent.ContextManager{
+    MaxTokens:  8000,
+    KeepFirst:  1,
+    KeepRecent: 20,
+}
+
+trimmed, err := cm.Trim(ctx, history)
+result, err := client.Loop(ctx, system, trimmed, tools, dispatch, 10)
+~~~
+
+The original history is not mutated. Tool-use/tool-result integrity is preserved. Summarization happens only if you configure a summarizer.
+
+### Assistant
+
+`Assistant` is the blessed middle path: a thin block that wires together a client, system prompt, toolset, context manager, iteration limit, and hooks.
+
+~~~go
+a := agent.Assistant{
+    Client:  client,
+    System:  "You are a helpful assistant.",
+    Tools:   toolset,
+    Context: agent.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+    MaxIter: 10,
+}
+
+result, err := a.Step(ctx, history)
+history = result.Messages
+~~~
+
+It is equivalent to:
+
+~~~go
+trimmed, err := a.Context.Trim(ctx, history)
+result, err := a.Client.Loop(ctx, a.System, trimmed, a.Tools.Tools(), a.Tools.Dispatch(), a.MaxIter)
+~~~
+
+No persistence, scheduler, runner, global registry, or hidden application lifecycle is introduced.
+
+## Built-in tools
+
+Built-ins are opt-in Lego blocks. They expose normal `agent.Tool`, `agent.ToolFunc`, and `agent.Toolset` values.
+
+Current packages:
+
+| Package | Tools |
+|---|---|
+| `agent/tools/clock` | current UTC time |
+| `agent/tools/math` | safe calculator |
+| `agent/tools/workspace` | sandboxed list, find, search, read, file info, and exact-string edit |
+
+Example:
+
+~~~go
+clockTool := clock.New()
+ws, err := workspace.NewReadOnly(workspace.Config{Root: "."})
+if err != nil {
+    log.Fatal(err)
+}
+
+toolset, err := agent.Join(clockTool.Toolset(), ws.Toolset())
+~~~
+
+Use `workspace.NewReadOnly` for read-only filesystem access. Use `workspace.New` only when you want the `edit_file` tool, and consider wrapping it with `WithConfirmation`.
+
+## MCP
+
+`agent/mcp` adapts Model Context Protocol tools into ordinary `gocode` toolsets.
+
+~~~go
+srv, err := mcp.Connect(ctx, mcp.Config{Command: "my-mcp-server"})
+if err != nil {
+    log.Fatal(err)
+}
+defer srv.Close()
+
+mcpTools, err := srv.Toolset(ctx)
+result, err := client.Loop(ctx, system, history, mcpTools.Tools(), mcpTools.Dispatch(), 10)
+~~~
+
+MCP support is explicit: you choose the server, inspect the tools, and pass them into the loop.
+
+## Streaming
+
+Use `AskStream` for one streamed response:
+
+~~~go
+_, err := client.AskStream(ctx, system, history, func(delta agent.ContentBlock) {
+    if delta.Type == agent.TypeText {
+        fmt.Print(delta.Text)
+    }
+})
+~~~
+
+Use `LoopStream` or `Assistant.StepStream` for streamed tool loops.
+
+Streaming callbacks fire synchronously as provider deltas arrive. Because retries can restart a stream after partial output, callbacks may see partial text from failed attempts. See the roadmap for the planned helper and recipe around this behavior.
+
+## Errors and retries
+
+Retries are built in for transient API failures such as rate limits, temporary network errors, and 5xx responses.
+
+~~~go
+client, err := agent.New(agent.Config{
+    Provider:  provider,
+    Model:     agent.ModelSonnet,
+    MaxTokens: 4096,
+    Retry: agent.RetryConfig{
+        MaxRetries:  5,
+        InitialWait: time.Second,
+        MaxWait:     30 * time.Second,
+    },
+})
+~~~
+
+Errors are typed and work with `errors.Is` and `errors.As`.
+
+Common cases:
+
+- `APIError`
+- `ToolError`
+- `LoopError`
+- `RetryExhaustedError`
+- `ErrMissingTool`
+- `ErrMaxIter`
+
+Tool execution errors are soft by default: the error is sent back to the model as a tool result with `IsError: true`. Missing tools are treated as configuration errors.
 
 ## Testing
 
-The `Provider` interface is the main testing seam.
+The `Provider` interface is the main testing seam. You can test calls, loops, streaming behavior, tool execution, history shape, usage accounting, and errors without real API calls.
 
-You can test `Ask`, `Loop`, streaming behavior, tool execution, history shape, usage accounting, and error handling without making real API calls.
+Run tests:
 
-Tests should focus on contracts:
+~~~bash
+go test ./agent/...
+~~~
+
+Good tests usually assert contracts rather than exact LLM prose:
 
 - messages appended in the expected order
 - tool calls produce expected tool results
-- errors match with `errors.Is` / `errors.As`
+- errors match with `errors.Is` and `errors.As`
 - callbacks fire in expected order
 - usage is accumulated
 - partial history is inspectable on failure
 
-Run the package tests with:
+## Examples
 
 ~~~bash
-go test ./agent
-~~~
-
-The repository includes tests for core loop behavior, retry logic, provider streaming parsing, errors, and parallel execution.
-
----
-
-## Configuration
-
-Client configuration:
-
-~~~go
-client, err := agent.New(agent.Config{
-	Provider:  provider,
-	Model:     agent.ModelSonnet,
-	MaxTokens: 4096,
-	Retry: agent.RetryConfig{
-		MaxRetries:  3,
-		InitialWait: time.Second,
-		MaxWait:     30 * time.Second,
-		Disabled:    false,
-	},
-})
-~~~
-
-Provider configuration:
-
-~~~go
-provider, err := agent.NewAnthropicProvider(agent.AnthropicConfig{
-	APIKey:     os.Getenv("ANTHROPIC_API_KEY"),
-	BaseURL:    "https://api.anthropic.com",
-	HTTPClient: &http.Client{Timeout: 30 * time.Second},
-})
-~~~
-
-~~~go
-provider, err := agent.NewOpenAIProvider(agent.OpenAIConfig{
-	APIKey:     os.Getenv("OPENAI_API_KEY"),
-	BaseURL:    "https://api.openai.com",
-	HTTPClient: &http.Client{Timeout: 30 * time.Second},
-})
-~~~
-
-~~~go
-provider, err := agent.NewOpenRouterProvider(agent.OpenRouterConfig{
-	APIKey:     os.Getenv("OPENROUTER_API_KEY"),
-	BaseURL:    "https://openrouter.ai",
-	HTTPClient: &http.Client{Timeout: 30 * time.Second},
-})
-~~~
-
-Common Anthropic model constants:
-
-~~~go
-agent.ModelOpus
-agent.ModelSonnet
-agent.ModelHaiku
-~~~
-
-You can also pass provider-specific model strings directly.
-
----
-
-## Running examples
-
-Set an API key first:
-
-~~~bash
-export ANTHROPIC_API_KEY=sk-ant-...
-~~~
-
-Then run examples:
-
-~~~bash
-# Tier 1: single model call
+# Single model call
 go run ./examples/ask
 
-# Tier 2: parallel and sequential composition
+# Parallel and sequential composition
 go run ./examples/pipeline
 
-# Tier 3: tool-using loop
+# Tool-using loop
 go run ./examples/agent
 
 # Streaming output
 go run ./examples/stream
 ~~~
 
----
-
-## Roadmap
-
-See **[ROADMAP.md](ROADMAP.md)** for the detailed future plan and **[VISION.md](VISION.md)** for the design philosophy.
-
-The completed foundation is now the baseline. The next phase is about progressive complexity: keep simple calls tiny, make practical agents easier to assemble, and keep advanced systems explicit and composable.
-
-Near-term priorities:
-
-1. Add a small, safe pre-built tool library.
-2. Add tool bindings, toolsets, and dispatch helpers for composing local tools, MCP tools, and skills.
-3. Add explicit context management that can be used directly and bundled into the practical agent pattern.
-4. Add a basic, extensible agent block: an assembled primitive with batteries included, designed to be customized, embedded, and built on.
-5. Add recipe-style documentation for common patterns.
-6. Add one compelling example app, likely a repo explainer CLI.
-7. Support MCP as a transparent adapter to ordinary `Tool` and `ToolFunc` values.
-8. Add transparent skills as inspectable bundles of prompts, tools, examples, and metadata.
-
-Production-focused follow-ups:
-
-1. Add boring session persistence without a runner.
-2. Add hooks, traces, and observability.
-3. Add extended model configuration.
-4. Add provider setup helpers such as environment-based constructors.
-5. Add testing, evaluation, and replay helpers.
-6. Add an HTTP/SSE service example.
-
-The guiding principle is:
-
-> Primitives first. Useful agent blocks second. No hidden runner.
-
-The library should support three paths:
-
-1. **Tiny path:** use `Ask` for one model call.
-2. **Practical path:** use toolsets, context management, and a basic agent block to build useful assistants with less glue while still owning history, storage, and execution.
-3. **Control path:** drop down to raw messages, raw tools, manual loops, custom providers, and explicit dispatch whenever needed.
-
-All paths should lead to the same transparent primitives.
-
----
+Set the relevant API key first.
 
 ## Package layout
 
 ~~~text
 agent/
-  agent.go        Client, New, Ask, AskStream, Loop, LoopStream, Config
-  provider.go     Provider, ProviderRequest, ProviderResponse
-  anthropic.go    AnthropicProvider
-  openai.go       OpenAIProvider
-  openrouter.go   OpenRouterProvider
-  message.go      Message, ContentBlock, NewUserMessage, TextContent
-  tool.go         Tool, ToolFunc, NewTool, InputSchema, ToolResult
-  client.go       Usage and shared constants
-  parallel.go     Parallel[T]
-  retry.go        RetryConfig and retry helpers
-  errors.go       APIError, ToolError, LoopError, RetryExhaustedError
+  agent.go                  Client, Ask, AskStream, Loop, LoopStream, Config
+  assistant.go              Assistant, Hooks
+  context.go                ContextManager
+  provider.go               Provider, ProviderRequest, ProviderResponse
+  anthropic.go              Anthropic provider and env helpers
+  openai.go                 OpenAI provider and env helpers
+  openrouter.go             OpenRouter provider and env helpers
+  message.go                Message, ContentBlock, helpers
+  tool.go                   Tool, ToolFunc, typed tools, schema helpers
+  toolset.go                ToolBinding, Toolset, middleware
+  parallel.go               Parallel[T]
+  retry.go                  RetryConfig and retry helpers
+  errors.go                 typed errors
+  mcp/                      MCP adapter
+  tools/clock/              current time tool
+  tools/math/               calculator tool
+  tools/workspace/          sandboxed workspace tools
+examples/
+  ask/
+  pipeline/
+  agent/
+  stream/
 ~~~
 
-The network boundary lives in provider implementations.
+## Roadmap summary
 
-The core orchestration types remain plain Go.
+Completed foundation:
 
-That plainness is part of the product. It makes the library easier for humans to debug and easier for coding agents to understand, extend, and safely modify.
+- providers, core model calls, tool loops, streaming, retries, typed errors
+- parallel tool execution
+- typed tool helpers and schema builders
+- safe built-in clock/math/workspace tools
+- toolsets and middleware
+- explicit context management
+- basic assistant block
+- MCP adapter
 
----
+Next focus:
+
+1. transparent skills as bundles of instructions, tools, examples, and metadata
+2. streaming retry helper and documentation
+3. recipe-style documentation
+4. repo explainer example app
+5. production helpers: sessions, durable tool execution, observability, extended model config, testing helpers, and HTTP/SSE example
+
+See [`ROADMAP.md`](ROADMAP.md) for details.
 
 ## Non-goals
 
@@ -785,9 +465,8 @@ That plainness is part of the product. It makes the library easier for humans to
 - a hidden scheduler
 - a deployment framework
 - a vector database
-- a cross-session memory platform
+- a global tool registry
+- a cross-session memory platform in the core package
 - a replacement for your application architecture
 
-Higher-level systems can be built on top of `gocode`.
-
-The library itself should remain small, explicit, composable, and easy to reason about.
+Higher-level systems can be built on top of `gocode`. The library itself should remain small, explicit, composable, and easy to reason about.
