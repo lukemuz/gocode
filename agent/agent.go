@@ -67,10 +67,18 @@ func (c *Client) Ask(ctx context.Context, system string, history []Message) (Mes
 // callback for every ContentBlock delta delivered by the provider
 // (typically incremental TypeText blocks). The final assembled
 // Message is returned once the stream completes. history is not
-// modified by this call. The callWithRetry wrapper is used, so
-// the callback may fire for partial content on any failed retry
-// attempts before a successful one.
+// modified by this call.
+//
+// Retry interaction: callWithRetry wraps the stream call, so onToken may fire
+// for partial content on a failed attempt before a successful retry begins.
+// Use StreamBuffer with RetryConfig.OnRetry to react to retries and clear
+// partial output before the next attempt starts.
+//
+// onToken may be nil, in which case token deltas are discarded.
 func (c *Client) AskStream(ctx context.Context, system string, history []Message, onToken func(ContentBlock)) (Message, error) {
+	if onToken == nil {
+		onToken = func(ContentBlock) {}
+	}
 	req := ProviderRequest{
 		Model:     c.cfg.Model,
 		MaxTokens: c.cfg.MaxTokens,
@@ -164,8 +172,13 @@ func (c *Client) Loop(
 // callWithRetry) on every iteration so that onToken receives each
 // ContentBlock delta as it arrives. After runTools completes, onToolResult
 // is called with the results (allowing live UI updates or logging) before
-// the tool results are appended and the loop continues. The onToken callback
-// may fire multiple times for a given turn if retries occur.
+// the tool results are appended and the loop continues.
+//
+// Retry interaction: onToken may fire multiple times for a given turn if retries
+// occur. Use StreamBuffer with RetryConfig.OnRetry to react to retries and
+// clear partial output before the next attempt starts.
+//
+// Both callbacks may be nil, in which case their respective events are discarded.
 func (c *Client) LoopStream(
 	ctx context.Context,
 	system string,
@@ -176,6 +189,12 @@ func (c *Client) LoopStream(
 	onToken func(ContentBlock),
 	onToolResult func([]ToolResult),
 ) (LoopResult, error) {
+	if onToken == nil {
+		onToken = func(ContentBlock) {}
+	}
+	if onToolResult == nil {
+		onToolResult = func([]ToolResult) {}
+	}
 	msgs := make([]Message, len(history))
 	copy(msgs, history)
 	var total Usage
