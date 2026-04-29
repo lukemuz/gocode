@@ -22,7 +22,7 @@ enough; see `COMPARISON.md` for which.
 | # | Recipe | What it demonstrates | Status |
 |---|---|---|---|
 | 01 | `01-assistant-with-tools` | Single assistant with a curated toolset, middleware, and context management | shipped |
-| 02 | `02-repo-explainer` | Sandboxed workspace tools, streaming, summarization, file-backed sessions | planned |
+| 02 | `02-repo-explainer` | Sandboxed workspace tools, streaming, summarization, file-backed sessions | shipped |
 | 03 | `03-workflow-agent` | Read-then-act batch workflow over a list of inputs | planned |
 | 04 | `04-router-subagents` | Parent agent delegates to specialist subagents — *subagents are tools* | shipped |
 | 05 | `05-persistent-chat` | Long-running conversation with `FileStore`, context trimming, and a summarizer | planned |
