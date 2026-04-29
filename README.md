@@ -103,7 +103,7 @@ history = append(history, reply, agent.NewUserMessage("Tell me more."))
 A tool has two parts: a model-facing definition and a Go function.
 
 ~~~go
-tool, fn, err := agent.NewTypedTool(
+tool, fn := agent.NewTypedTool(
     "calculator",
     "Do basic arithmetic.",
     agent.Object(

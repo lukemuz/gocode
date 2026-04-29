@@ -88,10 +88,11 @@ fmt.Println(result.FinalText())
 ~~~go
 type CalculatorInput struct {
     Operation string  `json:"operation"`
-    A, B      float64 `json:"a" json:"b"`
+    A         float64 `json:"a"`
+    B         float64 `json:"b"`
 }
 
-calc, calcFn, err := agent.NewTypedTool(
+calc, calcFn := agent.NewTypedTool(
     "calculator",
     "Do basic arithmetic.",
     agent.Object(

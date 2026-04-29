@@ -70,7 +70,7 @@ events = runner.run(session_id=session.id, new_message=...)
 **`gocode` shape.** A subagent is a `ToolFunc` that happens to call `Loop`. The parent's dispatch map *is* the routing mechanism.
 
 ```go
-researchTool, researchFn, _ := agent.NewTypedTool[input](
+researchTool, researchFn := agent.NewTypedTool[input](
     "research", "Delegate a research task.", schema,
     func(ctx context.Context, in input) (string, error) {
         r, err := cheap.Loop(ctx, researchSystem,
