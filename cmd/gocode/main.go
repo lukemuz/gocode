@@ -69,6 +69,7 @@ import (
 	"github.com/lukemuz/gocode/tools/editor"
 	"github.com/lukemuz/gocode/tools/subagent"
 	"github.com/lukemuz/gocode/tools/todo"
+	"github.com/lukemuz/gocode/tools/web"
 	"github.com/lukemuz/gocode/tools/workspace"
 )
 
@@ -80,6 +81,7 @@ You operate inside a workspace directory. Available tools:
 - bash: run shell commands (safety policy varies by configuration)
 - todo_write, todo_read: maintain a short planning checklist for multi-step work
 - batch: run several read-only tool calls concurrently in one turn (great for fanning out greps and reads)
+- web_fetch (when available): download an http(s) URL and return its content as text. HTML is converted to a plain-text approximation; long pages paginate via max_length + start_index. Use this for documentation lookups and inspecting URLs from error messages.
 - explore (when available): delegate inspection to a faster, cheaper specialist that returns a summary
 - plan (when available): delegate hard reasoning or design questions to a stronger model
 - now: current time
@@ -121,7 +123,7 @@ func main() {
 	exploreModel := flag.String("explore-model", "anthropic/claude-haiku-4.5", "model id for the explore subagent")
 	planModel := flag.String("plan-model", "anthropic/claude-opus-4.7", "model id for the plan subagent")
 	noSubagents := flag.Bool("no-subagents", false, "disable explore and plan subagent tools")
-	_ = flag.Bool("no-web", false, "deprecated no-op (server-hosted web tools are not wired for OpenRouter)")
+	noFetch := flag.Bool("no-fetch", false, "disable the native web_fetch tool")
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
 	autoYes := flag.Bool("yes", false, "auto-approve every confirmation prompt")
 	maxIter := flag.Int("max-iter", 30, "max model calls per turn")
@@ -260,11 +262,21 @@ func main() {
 
 	// --- main agent assembly ----------------------------------------------
 
+	var webTools gocode.Toolset
+	if !*noFetch {
+		webTools = web.New(web.Config{}).Toolset().Wrap(
+			gocode.WithTimeout(30*time.Second),
+			gocode.WithResultLimit(64*1024),
+			gocode.WithLogging(logger),
+		)
+	}
+
 	mainTools := gocode.MustJoin(
 		roTools,
 		gocode.Tools(roBatchBinding),
 		editTools,
 		todo.New().Toolset(),
+		webTools,
 		gocode.Tools(subagentBindings...),
 	).CacheLast(gocode.Ephemeral()) // cache the entire tool block — stable per session
 

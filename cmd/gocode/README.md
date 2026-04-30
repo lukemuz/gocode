@@ -99,11 +99,12 @@ Why three agents? Cost tiering and context isolation. The main Sonnet decides wh
 | `bash` | Sandboxed shell, governed by `-bash` mode | yes (in standard/unrestricted modes) |
 | `todo_write`, `todo_read` | Planning checklist; replace-whole-list semantics | no |
 | `batch` | Run several read-only tool calls concurrently in one turn | no |
+| `web_fetch` | Download a URL over http(s); HTML→text, paginates long pages | no |
 | `now` | Current time | no |
 | `explore(task)` | Delegate inspection to a Haiku-backed subagent | no |
 | `plan(task)` | Delegate hard reasoning to an Opus-backed subagent | no |
 
-`Glob` and `Grep` use the same names Claude Code uses, so the model recognises them immediately. Server-hosted web search/fetch are not currently wired through the OpenRouter provider; pair the agent with `bash` + `curl` if you need URL fetching.
+`Glob` and `Grep` use the same names Claude Code uses, so the model recognises them immediately. `web_fetch` is a native Go tool (no external dependency, no API key) that downloads a URL, strips scripts/styles, decodes entities, and paginates long pages via `max_length` + `start_index`. Disable it with `-no-fetch`. There is no built-in `web_search`; use `web_fetch` against a known URL or pair the agent with `bash` + `curl`.
 
 The `explore` and `plan` subagents are themselves agents with their own toolsets — the main agent can ask them anything within their scope.
 
@@ -139,7 +140,7 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | `-explore-model` | `anthropic/claude-haiku-4.5` | Model for the explore subagent |
 | `-plan-model` | `anthropic/claude-opus-4.7` | Model for the plan subagent |
 | `-no-subagents` | false | Disable the explore and plan tools |
-| `-no-web` | false | Deprecated no-op (kept for flag compatibility) |
+| `-no-fetch` | false | Disable the native `web_fetch` tool |
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |
 | `-yes` | false | Auto-approve every confirmation prompt |
 | `-max-iter` | 30 | Max model calls per user turn |
