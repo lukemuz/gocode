@@ -59,6 +59,11 @@ func NewOpenRouterClientFromEnv(model string) (*Client, error) {
 
 // Call implements Provider for OpenRouter.
 // It uses the OpenAI-compatible chat completions endpoint exposed by OpenRouter.
+//
+// cacheCompatible=true: OpenRouter accepts cache_control markers (passed
+// through to Anthropic backends, ignored by OpenAI backends), so we emit
+// the typed-parts content shape and tool cache_control field whenever the
+// canonical types carry them.
 func (p *OpenRouterProvider) Call(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
 	return doOpenAICompatibleCall(
 		ctx,
@@ -66,6 +71,7 @@ func (p *OpenRouterProvider) Call(ctx context.Context, req ProviderRequest) (Pro
 		p.cfg.APIKey,
 		p.cfg.BaseURL+"/api/v1/chat/completions",
 		req,
+		true,
 	)
 }
 
@@ -79,5 +85,6 @@ func (p *OpenRouterProvider) Stream(ctx context.Context, req ProviderRequest, on
 		p.cfg.BaseURL+"/api/v1/chat/completions",
 		req,
 		onDelta,
+		true,
 	)
 }

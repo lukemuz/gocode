@@ -37,6 +37,12 @@ type ProviderRequest struct {
 	Messages      []Message
 	Tools         []Tool
 	ProviderTools []ProviderTool
+
+	// SystemCache, if set, marks the system prompt as a cache breakpoint.
+	// This is the most useful single cache placement when the system text
+	// is large and stable across turns. Honored by AnthropicProvider and
+	// OpenRouterProvider; ignored elsewhere (OpenAI caches automatically).
+	SystemCache *CacheControl
 }
 
 // ProviderResponse is the normalised response every Provider must return.

@@ -76,13 +76,41 @@ func NewAnthropicClientFromEnv(model string) (*Client, error) {
 // server tools (web_search, code_execution) and category-2 client-executed
 // tools (bash, text_editor, computer) — both encoded as opaque JSON that the
 // Anthropic API accepts directly.
+//
+// System is `any` so it can be emitted either as the simple string form or,
+// when a cache breakpoint is set, as an array of typed text blocks. With
+// json:"omitempty" the nil interface is dropped from the request entirely.
 type anthropicRequest struct {
 	Model     string            `json:"model"`
 	MaxTokens int               `json:"max_tokens"`
-	System    string            `json:"system,omitempty"`
+	System    any               `json:"system,omitempty"`
 	Messages  []Message         `json:"messages"`
 	Tools     []json.RawMessage `json:"tools,omitempty"`
 	Stream    bool              `json:"stream,omitempty"`
+}
+
+// anthropicSystemBlock is the array-form payload used when the system
+// prompt carries a cache breakpoint. Anthropic accepts either a plain
+// string or a [{type, text, cache_control}] array — we only need the
+// text variant.
+type anthropicSystemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// anthropicSystem returns the value to assign to anthropicRequest.System.
+// When SystemCache is set and the prompt is non-empty, emit the array form
+// so cache_control rides along; otherwise emit a plain string (or nil for
+// an empty prompt, which omitempty drops).
+func anthropicSystem(text string, cache *CacheControl) any {
+	if text == "" {
+		return nil
+	}
+	if cache != nil {
+		return []anthropicSystemBlock{{Type: "text", Text: text, CacheControl: cache}}
+	}
+	return text
 }
 
 // providerTagAnthropic is the value Tool.Provider / ProviderTool.Provider
@@ -144,7 +172,7 @@ func (p *AnthropicProvider) Call(ctx context.Context, req ProviderRequest) (Prov
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.System,
+		System:    anthropicSystem(req.System, req.SystemCache),
 		Messages:  req.Messages,
 		Tools:     tools,
 	}
@@ -205,7 +233,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req ProviderRequest, onD
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.System,
+		System:    anthropicSystem(req.System, req.SystemCache),
 		Messages:  req.Messages,
 		Tools:     tools,
 		Stream:    true,
@@ -268,12 +296,10 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req ProviderRequest, onD
 		if typ, ok := event["type"].(string); ok {
 			switch typ {
 			case "message_start":
-				// Input token count is only sent in the message_start event.
+				// Input token count and cache stats are sent in message_start.
 				if msg, ok := event["message"].(map[string]interface{}); ok {
 					if u, ok := msg["usage"].(map[string]interface{}); ok {
-						if in, ok := u["input_tokens"].(float64); ok {
-							usage.InputTokens = int(in)
-						}
+						readAnthropicUsage(u, &usage)
 					}
 				}
 			case "error":
@@ -327,12 +353,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req ProviderRequest, onD
 					}
 				}
 				if u, ok := event["usage"].(map[string]interface{}); ok {
-					if in, ok := u["input_tokens"].(float64); ok {
-						usage.InputTokens = int(in)
-					}
-					if out, ok := u["output_tokens"].(float64); ok {
-						usage.OutputTokens = int(out)
-					}
+					readAnthropicUsage(u, &usage)
 				}
 			}
 		}
@@ -373,4 +394,23 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req ProviderRequest, onD
 		StopReason: stopReason,
 		Usage:      usage,
 	}, nil
+}
+
+// readAnthropicUsage extracts token counts from a streaming usage object.
+// Anthropic only sends fields that are non-zero, so missing keys leave the
+// usage struct unchanged. Cache stats (cache_creation_input_tokens and
+// cache_read_input_tokens) are merged in alongside input/output tokens.
+func readAnthropicUsage(u map[string]interface{}, usage *Usage) {
+	if v, ok := u["input_tokens"].(float64); ok {
+		usage.InputTokens = int(v)
+	}
+	if v, ok := u["output_tokens"].(float64); ok {
+		usage.OutputTokens = int(v)
+	}
+	if v, ok := u["cache_creation_input_tokens"].(float64); ok {
+		usage.CacheCreationTokens = int(v)
+	}
+	if v, ok := u["cache_read_input_tokens"].(float64); ok {
+		usage.CacheReadTokens = int(v)
+	}
 }

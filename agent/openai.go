@@ -26,11 +26,33 @@ type openAIChatRequest struct {
 	Stream    bool            `json:"stream,omitempty"`
 }
 
+// openAIMessage is a wire message. Content is `any` so request paths can
+// emit either a plain string or a typed-parts array (used to attach
+// cache_control on cache-aware backends like OpenRouter); response paths
+// receive a string and use messageContentString to coerce.
 type openAIMessage struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
+	Content    any              `json:"content,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+}
+
+// openAIContentPart is one element in the array form of openAIMessage.Content.
+// Only the text variant is supported; cache_control rides along when the
+// message was marked at the canonical layer.
+type openAIContentPart struct {
+	Type         string        `json:"type"` // always "text"
+	Text         string        `json:"text"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// messageContentString coerces the polymorphic Content field back to a
+// plain string when decoding responses (which always carry string content).
+func messageContentString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 type openAIToolCall struct {
@@ -49,6 +71,9 @@ type openAIToolDef struct {
 		Description string          `json:"description"`
 		Parameters  json.RawMessage `json:"parameters"`
 	} `json:"function"`
+	// CacheControl, when set, becomes a sibling field on the tool definition.
+	// Only emitted when the caller passes cacheCompatible=true (e.g. OpenRouter).
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 type openAIChatResponse struct {
@@ -57,8 +82,14 @@ type openAIChatResponse struct {
 		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			// CachedTokens is the OpenAI-compatible report of how many of
+			// the prompt tokens were served from the prompt cache. OpenRouter
+			// surfaces the same field for routes that support caching.
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -87,8 +118,11 @@ type openAIStreamChunk struct {
 		FinishReason *string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens,omitempty"`
-		CompletionTokens int `json:"completion_tokens,omitempty"`
+		PromptTokens        int `json:"prompt_tokens,omitempty"`
+		CompletionTokens    int `json:"completion_tokens,omitempty"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
 	} `json:"usage,omitempty"`
 }
 
@@ -98,45 +132,48 @@ type openAIStreamChunk struct {
 
 // toOpenAIMessages converts canonical Messages to OpenAI wire format.
 // system is prepended as a system-role message if non-empty.
-func toOpenAIMessages(system string, messages []Message) []openAIMessage {
+//
+// cacheCompatible controls whether cache_control markers ride along on the
+// wire. When true (e.g. OpenRouter), text content is emitted as a
+// typed-parts array so cache_control can attach to the right spot. When
+// false (e.g. OpenAI Chat Completions, which auto-caches and may reject
+// unknown fields), markers are dropped silently.
+func toOpenAIMessages(system string, systemCache *CacheControl, messages []Message, cacheCompatible bool) []openAIMessage {
 	var out []openAIMessage
 
 	if system != "" {
-		out = append(out, openAIMessage{Role: "system", Content: system})
+		out = append(out, openAIMessage{Role: "system", Content: wireTextContent(system, systemCache, cacheCompatible)})
 	}
 
 	for _, msg := range messages {
 		switch msg.Role {
 		case RoleAssistant:
 			m := openAIMessage{Role: RoleAssistant}
-			var textParts []string
+			text, cache := joinTextBlocks(msg.Content)
 			for _, block := range msg.Content {
-				switch block.Type {
-				case TypeText:
-					textParts = append(textParts, block.Text)
-				case TypeToolUse:
-					args := string(block.Input)
-					if args == "" {
-						args = "{}"
-					}
-					tc := openAIToolCall{
-						ID:   block.ID,
-						Type: "function",
-					}
-					tc.Function.Name = block.Name
-					tc.Function.Arguments = args
-					m.ToolCalls = append(m.ToolCalls, tc)
+				if block.Type != TypeToolUse {
+					continue
 				}
+				args := string(block.Input)
+				if args == "" {
+					args = "{}"
+				}
+				tc := openAIToolCall{
+					ID:   block.ID,
+					Type: "function",
+				}
+				tc.Function.Name = block.Name
+				tc.Function.Arguments = args
+				m.ToolCalls = append(m.ToolCalls, tc)
 			}
-			if len(textParts) > 0 {
-				m.Content = strings.Join(textParts, "")
+			if text != "" {
+				m.Content = wireTextContent(text, cache, cacheCompatible)
 			}
 			out = append(out, m)
 
 		case RoleUser:
 			// Separate tool_result blocks into individual tool-role messages;
 			// collect remaining text blocks into a single user message.
-			var textParts []string
 			for _, block := range msg.Content {
 				if block.Type == TypeToolResult {
 					out = append(out, openAIMessage{
@@ -144,20 +181,48 @@ func toOpenAIMessages(system string, messages []Message) []openAIMessage {
 						ToolCallID: block.ToolUseID,
 						Content:    block.Content,
 					})
-				} else if block.Type == TypeText {
-					textParts = append(textParts, block.Text)
 				}
 			}
-			if len(textParts) > 0 {
+			text, cache := joinTextBlocks(msg.Content)
+			if text != "" {
 				out = append(out, openAIMessage{
 					Role:    RoleUser,
-					Content: strings.Join(textParts, ""),
+					Content: wireTextContent(text, cache, cacheCompatible),
 				})
 			}
 		}
 	}
 
 	return out
+}
+
+// joinTextBlocks concatenates the text blocks within a Message and returns
+// the highest-precedence cache marker among them. If multiple text blocks
+// carry markers we keep the last one — for cumulative cache semantics the
+// later marker subsumes earlier ones at the same level.
+func joinTextBlocks(blocks []ContentBlock) (string, *CacheControl) {
+	var b strings.Builder
+	var cache *CacheControl
+	for _, block := range blocks {
+		if block.Type != TypeText {
+			continue
+		}
+		b.WriteString(block.Text)
+		if block.CacheControl != nil {
+			cache = block.CacheControl
+		}
+	}
+	return b.String(), cache
+}
+
+// wireTextContent picks the wire shape: plain string when no cache marker
+// applies (or the backend can't carry it), or a single-element typed-parts
+// array when we need to attach cache_control.
+func wireTextContent(text string, cache *CacheControl, cacheCompatible bool) any {
+	if cache == nil || !cacheCompatible {
+		return text
+	}
+	return []openAIContentPart{{Type: "text", Text: text, CacheControl: cache}}
 }
 
 // toOpenAITools converts canonical Tools to OpenAI function-calling format.
@@ -167,7 +232,18 @@ func toOpenAIMessages(system string, messages []Message) []openAIMessage {
 // declaration shapes cannot be translated faithfully. Callers who want
 // OpenAI-hosted tools (web_search, file_search, code_interpreter) need a
 // Responses-API provider, not Chat Completions.
-func toOpenAITools(tools []Tool, providerTools []ProviderTool) ([]openAIToolDef, error) {
+// toOpenAITools converts canonical Tools to OpenAI function-calling format.
+// Provider-tagged tools (category 2 — Anthropic-only declaration shapes) and
+// any ProviderTools (category 1 — server-executed) are rejected: the Chat
+// Completions endpoint does not expose hosted tools, and provider-defined
+// declaration shapes cannot be translated faithfully. Callers who want
+// OpenAI-hosted tools (web_search, file_search, code_interpreter) need a
+// Responses-API provider, not Chat Completions.
+//
+// cacheCompatible controls whether Tool.CacheControl markers are emitted
+// as a sibling cache_control field on the wire. False for stock OpenAI;
+// true for OpenRouter, which routes the marker to Anthropic backends.
+func toOpenAITools(tools []Tool, providerTools []ProviderTool, cacheCompatible bool) ([]openAIToolDef, error) {
 	if len(providerTools) > 0 {
 		return nil, fmt.Errorf("agent: openai (chat completions) does not support ProviderTools; use a Responses-API provider")
 	}
@@ -184,6 +260,9 @@ func toOpenAITools(tools []Tool, providerTools []ProviderTool) ([]openAIToolDef,
 		td.Function.Name = t.Name
 		td.Function.Description = t.Description
 		td.Function.Parameters = t.InputSchema
+		if cacheCompatible {
+			td.CacheControl = t.CacheControl
+		}
 		out[i] = td
 	}
 	return out, nil
@@ -212,10 +291,10 @@ func fromOpenAIResponse(r openAIChatResponse) ProviderResponse {
 	choice := r.Choices[0]
 	var content []ContentBlock
 
-	if choice.Message.Content != "" {
+	if text := messageContentString(choice.Message.Content); text != "" {
 		content = append(content, ContentBlock{
 			Type: TypeText,
-			Text: choice.Message.Content,
+			Text: text,
 		})
 	}
 
@@ -232,8 +311,9 @@ func fromOpenAIResponse(r openAIChatResponse) ProviderResponse {
 		Content:    content,
 		StopReason: openAIFinishReason(choice.FinishReason),
 		Usage: Usage{
-			InputTokens:  r.Usage.PromptTokens,
-			OutputTokens: r.Usage.CompletionTokens,
+			InputTokens:     r.Usage.PromptTokens,
+			OutputTokens:    r.Usage.CompletionTokens,
+			CacheReadTokens: r.Usage.PromptTokensDetails.CachedTokens,
 		},
 	}
 }
@@ -291,13 +371,13 @@ func NewOpenAIClientFromEnv(model string) (*Client, error) {
 
 // Call implements Provider for OpenAI.
 func (p *OpenAIProvider) Call(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
-	return doOpenAICompatibleCall(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req)
+	return doOpenAICompatibleCall(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, false)
 }
 
 // Stream implements Provider.Stream for OpenAI by delegating to the shared
 // streaming helper (mirrors the Call pattern).
 func (p *OpenAIProvider) Stream(ctx context.Context, req ProviderRequest, onDelta func(ContentBlock)) (ProviderResponse, error) {
-	return doOpenAICompatibleStream(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, onDelta)
+	return doOpenAICompatibleStream(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, onDelta, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -306,21 +386,25 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req ProviderRequest, onDelt
 
 // doOpenAICompatibleCall marshals req into an OpenAI chat completions body,
 // POSTs it to url with the given Bearer key, and decodes the response.
+//
+// cacheCompatible controls whether cache_control markers in canonical types
+// are emitted on the wire (OpenRouter), or dropped (stock OpenAI).
 func doOpenAICompatibleCall(
 	ctx context.Context,
 	httpClient *http.Client,
 	apiKey string,
 	url string,
 	req ProviderRequest,
+	cacheCompatible bool,
 ) (ProviderResponse, error) {
-	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools)
+	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible)
 	if err != nil {
 		return ProviderResponse{}, err
 	}
 	chatReq := openAIChatRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		Messages:  toOpenAIMessages(req.System, req.Messages),
+		Messages:  toOpenAIMessages(req.System, req.SystemCache, req.Messages, cacheCompatible),
 		Tools:     openaiTools,
 	}
 
@@ -376,15 +460,16 @@ func doOpenAICompatibleStream(
 	url string,
 	req ProviderRequest,
 	onDelta func(ContentBlock),
+	cacheCompatible bool,
 ) (ProviderResponse, error) {
-	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools)
+	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible)
 	if err != nil {
 		return ProviderResponse{}, err
 	}
 	chatReq := openAIChatRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		Messages:  toOpenAIMessages(req.System, req.Messages),
+		Messages:  toOpenAIMessages(req.System, req.SystemCache, req.Messages, cacheCompatible),
 		Tools:     openaiTools,
 		Stream:    true,
 	}
@@ -449,6 +534,7 @@ func doOpenAICompatibleStream(
 			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
 				usage.InputTokens = chunk.Usage.PromptTokens
 				usage.OutputTokens = chunk.Usage.CompletionTokens
+				usage.CacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 			continue
 		}
@@ -499,6 +585,7 @@ func doOpenAICompatibleStream(
 		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
 			usage.InputTokens = chunk.Usage.PromptTokens
 			usage.OutputTokens = chunk.Usage.CompletionTokens
+			usage.CacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 		}
 	}
 

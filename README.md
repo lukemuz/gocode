@@ -287,6 +287,34 @@ Tools and `ProviderTool`s are tagged for one provider; passing them to a differe
 
 **OpenAI: Chat Completions vs. Responses.** Hosted tools (`web_search`, `file_search`, `code_interpreter`, `image_generation`) live on `/v1/responses`, not `/v1/chat/completions`. Use `agent.NewOpenAIResponsesClientFromEnv(model)` (or build one from `NewOpenAIResponsesProvider`) when you want them. Plain function calling works on both endpoints; OpenAI has signaled Responses as the path forward, so prefer it for new code.
 
+## Prompt caching
+
+Long, stable prompts (system instructions, tool definitions, big context blocks) can be cached so subsequent turns pay a fraction of the input-token cost. Caching is provider-specific in mechanism but exposed uniformly via `agent.CacheControl`:
+
+~~~go
+// The most common pattern: cache the system prompt and the tool prefix
+// for any subsequent turn within the cache window.
+client, _ := agent.New(agent.Config{
+    Provider:    provider,
+    Model:       agent.ModelSonnet,
+    SystemCache: agent.Ephemeral(),       // 5-minute TTL
+})
+toolset := agent.Tools(...).CacheLast(agent.Ephemeral())
+~~~
+
+Per-provider behavior:
+
+| Provider | Caching mechanism | Honors markers? |
+|---|---|---|
+| `AnthropicProvider` | Explicit `cache_control` blocks (cumulative; up to 4 breakpoints) | Yes — system, tools, message blocks |
+| `OpenRouterProvider` | Translates markers to OpenAI-compatible typed-parts content; routed through to Anthropic backends | Yes — system, tools, message blocks |
+| `OpenAIProvider` | Automatic for prefixes ≥1024 tokens; no field needed | Markers ignored (dropped before send) |
+| `OpenAIResponsesProvider` | Automatic, same as Chat Completions | Markers ignored |
+
+Use `agent.EphemeralExtended()` for the 1-hour TTL when a prefix will be reused across long sessions.
+
+`Usage` reports cache stats when the provider returns them — `CacheCreationTokens` (Anthropic only — tokens written to cache this turn) and `CacheReadTokens` (Anthropic and OpenAI/OpenRouter — tokens served from cache at a discount).
+
 ## MCP
 
 `agent/mcp` adapts Model Context Protocol tools into ordinary toolsets.

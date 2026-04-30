@@ -39,6 +39,11 @@ type ContentBlock struct {
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
 
+	// CacheControl, if set, marks this block as a cache breakpoint. Caching
+	// is cumulative — see the CacheControl docs. Currently honored by
+	// AnthropicProvider and OpenRouterProvider; ignored by other providers.
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+
 	// Raw, if non-empty, is the verbatim JSON for this block. Set by
 	// UnmarshalJSON for unknown (provider-specific) types so they can be
 	// resent on the next request without loss. When set, MarshalJSON emits

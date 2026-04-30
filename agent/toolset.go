@@ -87,6 +87,28 @@ func (t Toolset) WithProviderTools(pt ...ProviderTool) Toolset {
 	return out
 }
 
+// CacheLast returns a copy of t with the last tool binding marked as a
+// cache breakpoint. Anthropic cache markers are cumulative — a marker on
+// the last tool caches the system prompt and every preceding tool — so
+// this is the standard "cache the stable prefix" pattern.
+//
+// No-op for empty toolsets. Honored only by providers that support cache
+// markers (AnthropicProvider, OpenRouterProvider routing to Anthropic);
+// other providers ignore it.
+func (t Toolset) CacheLast(cache *CacheControl) Toolset {
+	if len(t.Bindings) == 0 || cache == nil {
+		return t
+	}
+	out := Toolset{
+		Bindings:      append([]ToolBinding(nil), t.Bindings...),
+		ProviderTools: t.ProviderTools,
+	}
+	last := out.Bindings[len(out.Bindings)-1]
+	last.Tool.CacheControl = cache
+	out.Bindings[len(out.Bindings)-1] = last
+	return out
+}
+
 // Tools returns the Tool slice — the model-facing definitions — derived
 // from the bindings. Useful for inspection or for callers building their
 // own loop on top of the primitive provider interfaces.

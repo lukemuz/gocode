@@ -301,6 +301,13 @@ type Tool struct {
 	// declaration.
 	Provider string `json:"-"`
 
+	// CacheControl, if set, marks this tool as a cache breakpoint in the
+	// request. Caching is cumulative; placing the marker on the last tool
+	// in a stable toolset caches the system prompt and all earlier tools.
+	// Currently honored by AnthropicProvider and OpenRouterProvider.
+	// Ignored when Raw is set (the verbatim JSON wins).
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+
 	// Raw, if set, replaces the wire serialization of this tool. Used by
 	// provider-defined tools whose declaration form is not the standard
 	// {name, description, input_schema}. The agent loop never inspects Raw.
