@@ -24,6 +24,11 @@ const (
 //   - "text":        Text is the response string
 //   - "tool_use":    ID, Name, and Input carry the model's tool call
 //   - "tool_result": ToolUseID and Content carry the tool's return value
+//
+// Provider-specific block types (e.g. Anthropic's "server_tool_use" or
+// "web_search_tool_result", emitted when category-1 provider tools run) are
+// preserved opaquely in Raw and round-trip verbatim. The agent loop ignores
+// them — only Type=="tool_use" is dispatched locally.
 type ContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
@@ -33,6 +38,60 @@ type ContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+
+	// CacheControl, if set, marks this block as a cache breakpoint. Caching
+	// is cumulative — see the CacheControl docs. Currently honored by
+	// AnthropicProvider and OpenRouterProvider; ignored by other providers.
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+
+	// Raw, if non-empty, is the verbatim JSON for this block. Set by
+	// UnmarshalJSON for unknown (provider-specific) types so they can be
+	// resent on the next request without loss. When set, MarshalJSON emits
+	// Raw and ignores all other fields.
+	Raw json.RawMessage `json:"-"`
+}
+
+// known content-block types are decoded into typed fields. Anything else
+// is captured opaquely into Raw and round-tripped verbatim.
+func isKnownBlockType(t string) bool {
+	switch t {
+	case TypeText, TypeToolUse, TypeToolResult:
+		return true
+	}
+	return false
+}
+
+// MarshalJSON emits Raw verbatim if set; otherwise emits the standard fields.
+func (b ContentBlock) MarshalJSON() ([]byte, error) {
+	if len(b.Raw) > 0 {
+		return b.Raw, nil
+	}
+	type alias ContentBlock
+	return json.Marshal(alias(b))
+}
+
+// UnmarshalJSON decodes known block types into typed fields. For unknown
+// types it captures the entire JSON object into Raw so the block can be
+// re-sent verbatim on subsequent requests (Anthropic requires server-tool
+// result blocks to round-trip exactly).
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	var head struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return err
+	}
+	if !isKnownBlockType(head.Type) {
+		*b = ContentBlock{Type: head.Type, Raw: append(json.RawMessage(nil), data...)}
+		return nil
+	}
+	type alias ContentBlock
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*b = ContentBlock(a)
+	return nil
 }
 
 // Message is one turn in a conversation.

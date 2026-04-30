@@ -73,7 +73,7 @@ type Provider interface {
 }
 ~~~
 
-Anthropic, OpenAI, and OpenRouter are included. Any backend can implement the interface.
+Anthropic, OpenAI Chat Completions, OpenAI Responses, and OpenRouter are included. Any backend can implement the interface.
 
 ### `Client`
 
@@ -239,6 +239,79 @@ toolset := gocode.MustJoin(clockTool.Toolset(), ws.Toolset())
 ~~~
 
 `workspace.NewReadOnly` is read-only. `workspace.New` includes `edit_file` — wrap it with `WithConfirmation` before letting writes run.
+
+## Provider tools
+
+Some tools live on the provider side: Anthropic and OpenAI ship a set of tools the model is already trained to use. They split into two shapes.
+
+**Server-executed (category 1):** the provider runs the tool and returns the result inline. There is no Go function to write. Attach via `ProviderTools`:
+
+~~~go
+import (
+    "github.com/lukemuz/gocode"
+    "github.com/lukemuz/gocode/providers/anthropic"
+    "github.com/lukemuz/gocode/providers/openai"
+)
+
+// Anthropic — works against the standard Messages API.
+toolset := gocode.Tools(myLocalBinding).
+    WithProviderTools(
+        anthropic.WebSearch(anthropic.WebSearchOpts{MaxUses: 3}),
+        anthropic.CodeExecution(),
+    )
+
+// OpenAI Responses — needs openai.NewResponsesProvider.
+toolset := gocode.Tools(myLocalBinding).
+    WithProviderTools(
+        openai.WebSearch(),
+        openai.CodeInterpreter(openai.CodeInterpreterOpts{}),
+        openai.FileSearch(openai.FileSearchOpts{VectorStoreIDs: []string{"vs_..."}}),
+        openai.ImageGeneration(),
+    )
+~~~
+
+The agent loop never dispatches these — the response carries provider-specific result items (`server_tool_use`, `web_search_call`, `code_interpreter_call`, …) that round-trip verbatim via `ContentBlock.Raw`.
+
+**Provider-defined schema, you execute (category 2):** the model has been trained on the tool's name and arguments, but you supply the runtime — `bash`, `text_editor`, `computer`. The wire declaration is `{type, name}` instead of `{name, description, input_schema}`, and the dispatch flow is identical to a normal tool. Constructors return ordinary `gocode.ToolBinding`s:
+
+~~~go
+bash := anthropic.BashTool(func(ctx context.Context, in json.RawMessage) (string, error) {
+    // run the model's command in your sandbox of choice
+})
+toolset := gocode.Tools(bash).Wrap(gocode.WithConfirmation(promptUser))
+~~~
+
+Tools and `ProviderTool`s are tagged for one provider; passing them to a different one fails at request build with a clear error.
+
+**OpenAI: Chat Completions vs. Responses.** Hosted tools (`web_search`, `file_search`, `code_interpreter`, `image_generation`) live on `/v1/responses`, not `/v1/chat/completions`. Use `openai.NewResponsesClientFromEnv(model)` (or build one from `openai.NewResponsesProvider`) when you want them. Plain function calling works on both endpoints; OpenAI has signaled Responses as the path forward, so prefer it for new code.
+
+## Prompt caching
+
+Long, stable prompts (system instructions, tool definitions, big context blocks) can be cached so subsequent turns pay a fraction of the input-token cost. Caching is provider-specific in mechanism but exposed uniformly via `gocode.CacheControl`:
+
+~~~go
+// The most common pattern: cache the system prompt and the tool prefix
+// for any subsequent turn within the cache window.
+client, _ := gocode.New(gocode.Config{
+    Provider:    provider,
+    Model:       gocode.ModelSonnet,
+    SystemCache: gocode.Ephemeral(),       // 5-minute TTL
+})
+toolset := gocode.Tools(...).CacheLast(gocode.Ephemeral())
+~~~
+
+Per-provider behavior:
+
+| Provider | Caching mechanism | Honors markers? |
+|---|---|---|
+| `anthropic.Provider` | Explicit `cache_control` blocks (cumulative; up to 4 breakpoints) | Yes — system, tools, message blocks |
+| `openrouter.Provider` | Translates markers to OpenAI-compatible typed-parts content; routed through to Anthropic backends | Yes — system, tools, message blocks |
+| `openai.Provider` | Automatic for prefixes ≥1024 tokens; no field needed | Markers ignored (dropped before send) |
+| `openai.ResponsesProvider` | Automatic, same as Chat Completions | Markers ignored |
+
+Use `gocode.EphemeralExtended()` for the 1-hour TTL when a prefix will be reused across long sessions.
+
+`Usage` reports cache stats when the provider returns them — `CacheCreationTokens` (Anthropic only — tokens written to cache this turn) and `CacheReadTokens` (Anthropic and OpenAI/OpenRouter — tokens served from cache at a discount).
 
 ## MCP
 

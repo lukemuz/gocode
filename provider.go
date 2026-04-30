@@ -20,12 +20,29 @@ type Provider interface {
 }
 
 // ProviderRequest is the canonical request passed to every Provider.
+//
+// Tools are local (category-2 included) tool declarations the model may call;
+// the provider translates them to its native wire format and the agent loop
+// dispatches via ToolFunc when the model emits a tool_use block.
+//
+// ProviderTools are server-executed (category-1) tools — the provider runs
+// them and returns inline result blocks. The loop never inspects them; they
+// are passed straight through and spliced verbatim into the provider's tools
+// array. Each entry is tagged with a Provider string so providers can reject
+// mismatched entries at request build time.
 type ProviderRequest struct {
-	Model     string
-	MaxTokens int
-	System    string
-	Messages  []Message
-	Tools     []Tool
+	Model         string
+	MaxTokens     int
+	System        string
+	Messages      []Message
+	Tools         []Tool
+	ProviderTools []ProviderTool
+
+	// SystemCache, if set, marks the system prompt as a cache breakpoint.
+	// This is the most useful single cache placement when the system text
+	// is large and stable across turns. Honored by AnthropicProvider and
+	// OpenRouterProvider; ignored elsewhere (OpenAI caches automatically).
+	SystemCache *CacheControl
 }
 
 // ProviderResponse is the normalised response every Provider must return.

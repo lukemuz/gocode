@@ -73,13 +73,82 @@ func NewClientFromEnv(model string) (*gocode.Client, error) {
 }
 
 // anthropicRequest is the JSON body sent to POST /v1/messages.
+// Tools is a pre-serialized slice so we can mix standard tool declarations
+// (Tool.MarshalJSON output) with the typed declaration form used by category-1
+// server tools (web_search, code_execution) and category-2 client-executed
+// tools (bash, text_editor, computer) — both encoded as opaque JSON that the
+// Anthropic API accepts directly.
+//
+// System is `any` so it can be emitted either as the simple string form or,
+// when a cache breakpoint is set, as an array of typed text blocks. With
+// json:"omitempty" the nil interface is dropped from the request entirely.
 type anthropicRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system,omitempty"`
-	Messages  []gocode.Message `json:"messages"`
-	Tools     []gocode.Tool    `json:"tools,omitempty"`
-	Stream    bool      `json:"stream,omitempty"`
+	Model     string            `json:"model"`
+	MaxTokens int               `json:"max_tokens"`
+	System    any               `json:"system,omitempty"`
+	Messages  []gocode.Message  `json:"messages"`
+	Tools     []json.RawMessage `json:"tools,omitempty"`
+	Stream    bool              `json:"stream,omitempty"`
+}
+
+// anthropicSystemBlock is the array-form payload used when the system
+// prompt carries a cache breakpoint. Anthropic accepts either a plain
+// string or a [{type, text, cache_control}] array — we only need the
+// text variant.
+type anthropicSystemBlock struct {
+	Type         string               `json:"type"`
+	Text         string               `json:"text"`
+	CacheControl *gocode.CacheControl `json:"cache_control,omitempty"`
+}
+
+// anthropicSystem returns the value to assign to anthropicRequest.System.
+// When SystemCache is set and the prompt is non-empty, emit the array form
+// so cache_control rides along; otherwise emit a plain string (or nil for
+// an empty prompt, which omitempty drops).
+func anthropicSystem(text string, cache *gocode.CacheControl) any {
+	if text == "" {
+		return nil
+	}
+	if cache != nil {
+		return []anthropicSystemBlock{{Type: "text", Text: text, CacheControl: cache}}
+	}
+	return text
+}
+
+// ProviderTag is the value gocode.Tool.Provider and gocode.ProviderTool.Provider
+// must carry for an entry to be accepted by this provider. Exported so the
+// constructors in tools.go (and any third-party constructors) can stamp it.
+const ProviderTag = "anthropic"
+
+// buildTools merges local gocode.Tool declarations and provider-side
+// (category-1) gocode.ProviderTool entries into the wire []json.RawMessage
+// that becomes the Anthropic request's "tools" array. Any entry tagged for a
+// different provider is rejected so misuse fails loudly at request build.
+func buildTools(tools []gocode.Tool, providerTools []gocode.ProviderTool) ([]json.RawMessage, error) {
+	if len(tools) == 0 && len(providerTools) == 0 {
+		return nil, nil
+	}
+	out := make([]json.RawMessage, 0, len(tools)+len(providerTools))
+	for _, t := range tools {
+		if t.Provider != "" && t.Provider != ProviderTag {
+			return nil, fmt.Errorf("gocode: anthropic: tool %q is tagged for provider %q", t.Name, t.Provider)
+		}
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return nil, fmt.Errorf("gocode: anthropic: marshal tool %q: %w", t.Name, err)
+		}
+		out = append(out, raw)
+	}
+	for i, pt := range providerTools {
+		if pt.Provider != ProviderTag {
+			return nil, fmt.Errorf("gocode: anthropic: provider tool [%d] is tagged for provider %q", i, pt.Provider)
+		}
+		if len(pt.Raw) == 0 {
+			return nil, fmt.Errorf("gocode: anthropic: provider tool [%d] has empty Raw", i)
+		}
+		out = append(out, pt.Raw)
+	}
+	return out, nil
 }
 
 // anthropicResponse is the parsed reply from the Anthropic API.
@@ -99,12 +168,16 @@ type apiErrorBody struct {
 
 // Call implements Provider.
 func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode.ProviderResponse, error) {
+	tools, err := buildTools(req.Tools, req.ProviderTools)
+	if err != nil {
+		return gocode.ProviderResponse{}, err
+	}
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.System,
+		System:    anthropicSystem(req.System, req.SystemCache),
 		Messages:  req.Messages,
-		Tools:     req.Tools,
+		Tools:     tools,
 	}
 
 	body, err := json.Marshal(wireReq)
@@ -156,12 +229,16 @@ func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode
 // gocode.ProviderResponse (handles one tool per turn for simplicity). Mirrors Call's
 // error handling, headers, and request shape (with stream=true).
 func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDelta func(gocode.ContentBlock)) (gocode.ProviderResponse, error) {
+	tools, err := buildTools(req.Tools, req.ProviderTools)
+	if err != nil {
+		return gocode.ProviderResponse{}, err
+	}
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.System,
+		System:    anthropicSystem(req.System, req.SystemCache),
 		Messages:  req.Messages,
-		Tools:     req.Tools,
+		Tools:     tools,
 		Stream:    true,
 	}
 
@@ -222,12 +299,10 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 		if typ, ok := event["type"].(string); ok {
 			switch typ {
 			case "message_start":
-				// Input token count is only sent in the message_start event.
+				// Input token count and cache stats are sent in message_start.
 				if msg, ok := event["message"].(map[string]interface{}); ok {
 					if u, ok := msg["usage"].(map[string]interface{}); ok {
-						if in, ok := u["input_tokens"].(float64); ok {
-							usage.InputTokens = int(in)
-						}
+						readAnthropicUsage(u, &usage)
 					}
 				}
 			case "error":
@@ -281,12 +356,7 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 					}
 				}
 				if u, ok := event["usage"].(map[string]interface{}); ok {
-					if in, ok := u["input_tokens"].(float64); ok {
-						usage.InputTokens = int(in)
-					}
-					if out, ok := u["output_tokens"].(float64); ok {
-						usage.OutputTokens = int(out)
-					}
+					readAnthropicUsage(u, &usage)
 				}
 			}
 		}
@@ -327,4 +397,23 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 		StopReason: stopReason,
 		Usage:      usage,
 	}, nil
+}
+
+// readAnthropicUsage extracts token counts from a streaming usage object.
+// Anthropic only sends fields that are non-zero, so missing keys leave the
+// usage struct unchanged. Cache stats (cache_creation_input_tokens and
+// cache_read_input_tokens) are merged in alongside input/output tokens.
+func readAnthropicUsage(u map[string]interface{}, usage *gocode.Usage) {
+	if v, ok := u["input_tokens"].(float64); ok {
+		usage.InputTokens = int(v)
+	}
+	if v, ok := u["output_tokens"].(float64); ok {
+		usage.OutputTokens = int(v)
+	}
+	if v, ok := u["cache_creation_input_tokens"].(float64); ok {
+		usage.CacheCreationTokens = int(v)
+	}
+	if v, ok := u["cache_read_input_tokens"].(float64); ok {
+		usage.CacheReadTokens = int(v)
+	}
 }

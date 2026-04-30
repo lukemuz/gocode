@@ -64,8 +64,13 @@ func NewClientFromEnv(model string) (*gocode.Client, error) {
 	return gocode.New(gocode.Config{Provider: provider, Model: model})
 }
 
-// Call implements Provider for OpenRouter.
-// It uses the OpenAI-compatible chat completions endpoint exposed by OpenRouter.
+// Call implements gocode.Provider for OpenRouter using the OpenAI-compatible
+// chat completions endpoint.
+//
+// cacheCompatible=true: OpenRouter accepts cache_control markers (passed
+// through to Anthropic backends, ignored by OpenAI backends), so we emit
+// the typed-parts content shape and tool cache_control field whenever the
+// canonical types carry them.
 func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode.ProviderResponse, error) {
 	return openai.CompatibleCall(
 		ctx,
@@ -73,11 +78,12 @@ func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode
 		p.cfg.APIKey,
 		p.cfg.BaseURL+"/api/v1/chat/completions",
 		req,
+		true,
 	)
 }
 
-// Stream implements Provider.Stream for OpenRouter by delegating to the shared
-// streaming helper (mirrors the Call pattern).
+// Stream implements gocode.Provider.Stream for OpenRouter by delegating to
+// the shared streaming helper (mirrors the Call pattern).
 func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDelta func(gocode.ContentBlock)) (gocode.ProviderResponse, error) {
 	return openai.CompatibleStream(
 		ctx,
@@ -86,5 +92,6 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 		p.cfg.BaseURL+"/api/v1/chat/completions",
 		req,
 		onDelta,
+		true,
 	)
 }

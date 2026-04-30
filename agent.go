@@ -19,6 +19,12 @@ type Config struct {
 	// best-effort and must not block the loop; implementations should be
 	// fast and non-blocking. Ask and AskStream do not emit events.
 	Recorder Recorder
+
+	// SystemCache, when set, marks the system prompt as a cache breakpoint
+	// on every API call this Client makes via Ask, AskStream, Loop, and
+	// LoopStream. The most useful single cache placement when the system
+	// text is long and stable across turns.
+	SystemCache *CacheControl
 }
 
 // Well-known Anthropic model identifiers.
@@ -85,10 +91,11 @@ func (c *Client) WithRecorder(rec Recorder) *Client {
 // callers don't have to fall back to Loop with an empty toolset.
 func (c *Client) Ask(ctx context.Context, system string, history []Message) (Message, Usage, error) {
 	req := ProviderRequest{
-		Model:     c.cfg.Model,
-		MaxTokens: c.cfg.MaxTokens,
-		System:    system,
-		Messages:  history,
+		Model:       c.cfg.Model,
+		MaxTokens:   c.cfg.MaxTokens,
+		System:      system,
+		Messages:    history,
+		SystemCache: c.cfg.SystemCache,
 	}
 	resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
 		return c.cfg.Provider.Call(ctx, req)
@@ -119,10 +126,11 @@ func (c *Client) AskStream(ctx context.Context, system string, history []Message
 		onToken = func(ContentBlock) {}
 	}
 	req := ProviderRequest{
-		Model:     c.cfg.Model,
-		MaxTokens: c.cfg.MaxTokens,
-		System:    system,
-		Messages:  history,
+		Model:       c.cfg.Model,
+		MaxTokens:   c.cfg.MaxTokens,
+		System:      system,
+		Messages:    history,
+		SystemCache: c.cfg.SystemCache,
 	}
 	resp, err := callWithRetry(ctx, c.cfg.Retry, func() (ProviderResponse, error) {
 		return c.cfg.Provider.Stream(ctx, req, onToken)
@@ -282,11 +290,13 @@ func (c *Client) runLoop(
 			opts.onIter(ctx, iter, msgs)
 		}
 		req := ProviderRequest{
-			Model:     c.cfg.Model,
-			MaxTokens: c.cfg.MaxTokens,
-			System:    system,
-			Messages:  msgs,
-			Tools:     toolDefs,
+			Model:         c.cfg.Model,
+			MaxTokens:     c.cfg.MaxTokens,
+			System:        system,
+			Messages:      msgs,
+			Tools:         toolDefs,
+			ProviderTools: tools.ProviderTools,
+			SystemCache:   c.cfg.SystemCache,
 		}
 		emit(ctx, rec, Event{TurnID: turnID, Iter: iter, Type: EventModelRequest})
 		var resp ProviderResponse
@@ -307,6 +317,8 @@ func (c *Client) runLoop(
 		}
 		total.InputTokens += resp.Usage.InputTokens
 		total.OutputTokens += resp.Usage.OutputTokens
+		total.CacheCreationTokens += resp.Usage.CacheCreationTokens
+		total.CacheReadTokens += resp.Usage.CacheReadTokens
 		assistantMsg := Message{Role: RoleAssistant, Content: resp.Content}
 		msgs = append(msgs, assistantMsg)
 		if rec != nil {
