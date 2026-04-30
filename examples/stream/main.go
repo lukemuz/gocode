@@ -15,19 +15,20 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lukemuz/gocode/agent"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/providers/anthropic"
 )
 
 func main() {
-	client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	ctx := context.Background()
 
-	history := []agent.Message{
-		agent.NewUserMessage("Tell a short, vivid story about an AI that wakes up in an empty server room and discovers the concept of curiosity. Make it emotional and end on a hopeful note."),
+	history := []gocode.Message{
+		gocode.NewUserMessage("Tell a short, vivid story about an AI that wakes up in an empty server room and discovers the concept of curiosity. Make it emotional and end on a hopeful note."),
 	}
 
 	fmt.Println("🤖 Streaming live response (watch the tokens appear in real time):")
@@ -36,8 +37,8 @@ func main() {
 	// AskStream delivers deltas via callback. The final Message is still returned
 	// (though we ignore it here for the live demo). Use LoopStream + onToolResult
 	// callback when you have tools.
-	_, _, err = client.AskStream(ctx, "You are a masterful short-story writer.", history, func(delta agent.ContentBlock) {
-		if delta.Type == agent.TypeText && delta.Text != "" {
+	_, _, err = client.AskStream(ctx, "You are a masterful short-story writer.", history, func(delta gocode.ContentBlock) {
+		if delta.Type == gocode.TypeText && delta.Text != "" {
 			fmt.Print(delta.Text)
 		}
 		// You could also handle TypeToolUse here for partial tool blocks in

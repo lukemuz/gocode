@@ -1,20 +1,20 @@
 # Recipe 06: parallel-then-sequential pipeline
 
 Demonstrates `gocode`'s position that **a workflow is just Go**. Two steps
-run concurrently via `agent.Parallel`; a third step consumes their outputs
+run concurrently via `gocode.Parallel`; a third step consumes their outputs
 in a single follow-up call. There is no `Pipeline`, `ParallelAgent`, or
 `SequentialAgent` type — fan-out is a goroutine helper, fan-in is a
 function call, and the data flow is visible top-to-bottom in `main.go`.
 
 ## What this shows
 
-- `agent.Parallel` running two `StepFunc[string]` concurrently and
+- `gocode.Parallel` running two `StepFunc[string]` concurrently and
   returning index-aligned `[]Result[string]`.
 - Per-step error handling: each `Result` carries its own `Err`, so the
   caller decides whether one failure aborts the pipeline or degrades it.
 - A sequential step (the comparison call) reading both parallel outputs
   via ordinary local variables — no shared blackboard, no event bus.
-- The same `*agent.Client` reused across all three calls; cost-tiering or
+- The same `*gocode.Client` reused across all three calls; cost-tiering or
   per-step models would be a one-line change.
 
 ## Run
@@ -26,9 +26,9 @@ go run ./examples/recipes/06-parallel-pipeline
 
 ## Library features exercised
 
-- `agent.Parallel`, `agent.StepFunc`, `agent.Result`
-- `agent.Client.Ask` for single-shot calls (no tool loop)
-- `agent.NewUserMessage`, `agent.TextContent`
+- `gocode.Parallel`, `gocode.StepFunc`, `gocode.Result`
+- `gocode.Client.Ask` for single-shot calls (no tool loop)
+- `gocode.NewUserMessage`, `gocode.TextContent`
 
 ## ADK comparison
 

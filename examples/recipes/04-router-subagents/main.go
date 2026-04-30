@@ -25,9 +25,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lukemuz/gocode/agent"
-	"github.com/lukemuz/gocode/agent/tools/clock"
-	"github.com/lukemuz/gocode/agent/tools/workspace"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/gocode/tools/clock"
+	"github.com/lukemuz/gocode/tools/workspace"
 )
 
 func main() {
@@ -44,22 +45,22 @@ func main() {
 	// Two clients: a smarter model for the orchestrator, a cheaper one for
 	// the specialists. This is the cost-tiering pattern that "subagents are
 	// tools" makes trivial — there's no shared session to coordinate.
-	provider, err := agent.NewAnthropicProviderFromEnv()
+	provider, err := anthropic.NewProviderFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	smart, err := agent.New(agent.Config{Provider: provider, Model: agent.ModelSonnet, MaxTokens: 4096})
+	smart, err := gocode.New(gocode.Config{Provider: provider, Model: gocode.ModelSonnet, MaxTokens: 4096})
 	if err != nil {
 		log.Fatal(err)
 	}
-	cheap := smart.WithModel(agent.ModelHaiku)
+	cheap := smart.WithModel(gocode.ModelHaiku)
 
 	// Research subagent: workspace + clock, sandboxed to -dir.
 	ws, err := workspace.NewReadOnly(workspace.Config{Root: *dir})
 	if err != nil {
 		log.Fatal(err)
 	}
-	researchTools := agent.MustJoin(clock.New().Toolset(), ws.Toolset())
+	researchTools := gocode.MustJoin(clock.New().Toolset(), ws.Toolset())
 
 	researchTool, researchFn := subagentTool(
 		"research",
@@ -83,25 +84,25 @@ func main() {
 		cheap,
 		"You are a writing specialist. Turn the supplied notes into a clear, "+
 			"well-structured answer. Be specific. Do not invent facts beyond the notes.",
-		agent.Toolset{},
+		gocode.Toolset{},
 		2,
 	)
 
-	orchestrator := agent.Agent{
+	orchestrator := gocode.Agent{
 		Client: smart,
 		System: "You are an orchestrator. You have two specialists available as tools: " +
 			"`research` (can inspect the project directory) and `write` (turns notes into prose). " +
 			"For factual questions about the codebase, call `research` first, then `write` to " +
 			"format the final answer. For pure writing tasks, skip `research`. " +
 			"Return only the final polished answer to the user.",
-		Tools: agent.Toolset{Bindings: []agent.ToolBinding{
-			{Tool: researchTool, Func: researchFn, Meta: agent.ToolMetadata{Source: "subagent/research"}},
-			{Tool: writeTool, Func: writeFn, Meta: agent.ToolMetadata{Source: "subagent/write"}},
-		}},
+		Tools: gocode.Tools(
+			gocode.ToolBinding{Tool: researchTool, Func: researchFn, Meta: gocode.ToolMetadata{Source: "subagent/research"}},
+			gocode.ToolBinding{Tool: writeTool, Func: writeFn, Meta: gocode.ToolMetadata{Source: "subagent/write"}},
+		),
 		MaxIter: 6,
 	}
 
-	history := []agent.Message{agent.NewUserMessage(question)}
+	history := []gocode.Message{gocode.NewUserMessage(question)}
 	result, err := orchestrator.Step(ctx, history)
 	if err != nil {
 		log.Fatal(err)
@@ -121,25 +122,25 @@ func main() {
 // might earn a place in the library, not before.
 func subagentTool(
 	name, description string,
-	client *agent.Client,
+	client *gocode.Client,
 	system string,
-	tools agent.Toolset,
+	tools gocode.Toolset,
 	maxIter int,
-) (agent.Tool, agent.ToolFunc) {
+) (gocode.Tool, gocode.ToolFunc) {
 	type input struct {
 		Task string `json:"task"`
 	}
-	return agent.NewTypedTool[input](
+	return gocode.NewTypedTool[input](
 		name,
 		description,
-		agent.Object(
-			agent.String("task", "Self-contained task description for the specialist", agent.Required()),
+		gocode.Object(
+			gocode.String("task", "Self-contained task description for the specialist", gocode.Required()),
 		),
 		func(ctx context.Context, in input) (string, error) {
 			result, err := client.Loop(
 				ctx,
 				system,
-				[]agent.Message{agent.NewUserMessage(in.Task)},
+				[]gocode.Message{gocode.NewUserMessage(in.Task)},
 				tools,
 				maxIter,
 			)
@@ -159,9 +160,9 @@ func subagentTool(
 
 // summarizeOnError extracts whatever text the subagent managed to produce
 // before failing. This is best-effort context for the parent agent.
-func summarizeOnError(result agent.LoopResult) string {
+func summarizeOnError(result gocode.LoopResult) string {
 	for i := len(result.Messages) - 1; i >= 0; i-- {
-		if t := agent.TextContent(result.Messages[i]); t != "" {
+		if t := gocode.TextContent(result.Messages[i]); t != "" {
 			b, _ := json.Marshal(map[string]string{"partial": t})
 			return string(b)
 		}

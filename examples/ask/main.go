@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lukemuz/gocode/agent"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/providers/anthropic"
 )
 
 func main() {
-	client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	history := []agent.Message{
-		agent.NewUserMessage("What is the capital of France?"),
+	history := []gocode.Message{
+		gocode.NewUserMessage("What is the capital of France?"),
 	}
 
 	reply, usage, err := client.Ask(context.Background(), "", history)
@@ -24,6 +25,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println(agent.TextContent(reply))
+	fmt.Println(gocode.TextContent(reply))
 	fmt.Printf("\n(tokens: %d in / %d out)\n", usage.InputTokens, usage.OutputTokens)
 }

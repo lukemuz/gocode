@@ -26,8 +26,8 @@ recipe second to see what each layer adds.
 
 ## Library features exercised
 
-- `agent.NewAnthropicClientFromEnv`
-- `agent.Client.Loop`
-- `agent.Join`, `agent.Toolset`
-- `agent.NewUserMessage`, `agent.TextContent`
-- Built-ins: `agent/tools/clock`, `agent/tools/math`
+- `gocode.NewAnthropicClientFromEnv`
+- `gocode.Client.Loop`
+- `gocode.Join`, `gocode.Toolset`
+- `gocode.NewUserMessage`, `gocode.TextContent`
+- Built-ins: `tools/clock`, `tools/math`

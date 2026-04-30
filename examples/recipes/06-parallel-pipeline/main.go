@@ -1,6 +1,6 @@
 // Recipe 06: parallel steps feeding a sequential step.
 //
-// Two model calls run concurrently via agent.Parallel; their outputs are
+// Two model calls run concurrently via gocode.Parallel; their outputs are
 // stitched into a single follow-up prompt. The "pipeline" is just Go control
 // flow — there is no graph runtime, no DAG type.
 package main
@@ -10,19 +10,20 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lukemuz/gocode/agent"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/providers/anthropic"
 )
 
 func main() {
 	ctx := context.Background()
 
-	client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Fan out: summarize two subjects in parallel.
-	results := agent.Parallel(ctx,
+	results := gocode.Parallel(ctx,
 		func(ctx context.Context) (string, error) {
 			return ask(ctx, client, "Summarize the rise of the Roman Empire in two sentences.")
 		},
@@ -47,10 +48,10 @@ func main() {
 	fmt.Println(comparison)
 }
 
-func ask(ctx context.Context, client *agent.Client, prompt string) (string, error) {
-	reply, _, err := client.Ask(ctx, "", []agent.Message{agent.NewUserMessage(prompt)})
+func ask(ctx context.Context, client *gocode.Client, prompt string) (string, error) {
+	reply, _, err := client.Ask(ctx, "", []gocode.Message{gocode.NewUserMessage(prompt)})
 	if err != nil {
 		return "", err
 	}
-	return agent.TextContent(reply), nil
+	return gocode.TextContent(reply), nil
 }
