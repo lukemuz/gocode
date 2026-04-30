@@ -4,17 +4,75 @@ A fast, economical CLI coding agent built on the gocode toolkit. Inspired by Cla
 
 ## Install / run
 
+You'll need an Anthropic API key in your environment for any of these:
+
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-go run ./cmd/gocode -dir .
 ```
 
-Or build a binary:
+### Option A — install once, run anywhere (recommended)
+
+```bash
+go install github.com/lukemuz/gocode/cmd/gocode@latest
+```
+
+This drops a `gocode` binary in `$(go env GOBIN)` (or `$(go env GOPATH)/bin` if `GOBIN` is unset). Make sure that directory is on your `PATH`:
+
+```bash
+echo $PATH | tr ':' '\n' | grep -q "$(go env GOPATH)/bin" || \
+  echo 'add $(go env GOPATH)/bin to your PATH'
+```
+
+Then from any directory you want the agent to work in:
+
+```bash
+cd ~/your-project
+gocode -log auto
+```
+
+To re-install after pulling new commits, run `go install ...` again.
+
+### Option B — build a local binary in this repo
+
+From the gocode checkout:
 
 ```bash
 go build -o bin/gocode ./cmd/gocode
-./bin/gocode -dir .
+./bin/gocode -dir ~/your-project -log auto
 ```
+
+Or symlink it into your `PATH`:
+
+```bash
+sudo ln -s "$(pwd)/bin/gocode" /usr/local/bin/gocode
+```
+
+### Option C — `go run` (development only)
+
+Useful while editing gocode itself. From the repo root:
+
+```bash
+go run ./cmd/gocode -dir ~/your-project
+```
+
+Slow start every time (re-compiles), but no binary to manage.
+
+### First-run sanity check
+
+```bash
+gocode -dir . -log auto
+```
+
+You should see:
+```
+gocode  model=claude-sonnet-4-6  bash=restricted  subagents=on  dir=/abs/path
+        explore=claude-haiku-4-5-20251001  plan=claude-opus-4-7
+        log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
+type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
+> 
+```
+
+If you get `anthropic provider: ANTHROPIC_API_KEY environment variable is not set`, you missed the `export` step.
 
 ## What's running
 
