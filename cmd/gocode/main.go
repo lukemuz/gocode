@@ -174,7 +174,8 @@ func main() {
 	var subagentBindings []gocode.ToolBinding
 	if !*noSubagents {
 		exploreClient := mainClient.WithModel(*exploreModel)
-		exploreTools := gocode.MustJoin(roTools, subBashToolset, gocode.Tools(roBatchBinding))
+		exploreTools := gocode.MustJoin(roTools, subBashToolset, gocode.Tools(roBatchBinding)).
+			CacheLast(gocode.Ephemeral())
 		exploreBinding, err := subagent.New(subagent.Config{
 			Name:        "explore",
 			Description: "Delegate a focused inspection task to a fast, cheap specialist. Provide a self-contained task description (e.g. 'find every caller of FooBar in /internal and summarise their patterns'). The specialist has read-only filesystem tools, restricted bash, and batch fan-out. It returns a concise textual summary; its iteration history is discarded so it does not pollute your context. Use this whenever a task involves reading more than two or three files.",
@@ -193,7 +194,7 @@ func main() {
 			Description: "Delegate a hard reasoning task — architecture decision, subtle bug analysis, debugging strategy — to a stronger model. Pass the question PLUS the relevant context you have already gathered (file excerpts, error messages, prior attempts). The specialist returns a structured plan with numbered steps and risks. Use sparingly; it is expensive.",
 			Client:      planClient,
 			System:      planSystemPrompt,
-			Tools:       roTools, // read-only, no shell, no edits
+			Tools:       roTools.CacheLast(gocode.Ephemeral()),
 			MaxIter:     6,
 		})
 		if err != nil {
@@ -232,11 +233,16 @@ func main() {
 		editTools,
 		todo.New().Toolset(),
 		gocode.Tools(subagentBindings...),
-	)
+	).CacheLast(gocode.Ephemeral()) // cache the entire tool block — stable per session
+
+	system := mainSystemPrompt
+	if memory := loadProjectMemory(*dir); memory != "" {
+		system += "\n\n## Project memory\n\n" + memory
+	}
 
 	agent := gocode.Agent{
 		Client: mainClient,
-		System: mainSystemPrompt,
+		System: system,
 		Tools:  mainTools,
 		Context: gocode.ContextManager{
 			MaxTokens:  120_000,
