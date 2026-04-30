@@ -20,9 +20,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lukemuz/gocode/agent"
-	"github.com/lukemuz/gocode/agent/tools/clock"
-	"github.com/lukemuz/gocode/agent/tools/math"
+	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/gocode/tools/clock"
+	"github.com/lukemuz/gocode/tools/math"
 )
 
 func main() {
@@ -31,17 +32,17 @@ func main() {
 		log.Fatal(`usage: minimal "your question"`)
 	}
 
-	client, err := agent.NewAnthropicClientFromEnv(agent.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	tools := agent.MustJoin(clock.New().Toolset(), math.New().Toolset())
+	tools := gocode.MustJoin(clock.New().Toolset(), math.New().Toolset())
 
 	result, err := client.Loop(
 		context.Background(),
 		"You are a concise helper. Use your tools when they would give a more accurate answer than guessing.",
-		[]agent.Message{agent.NewUserMessage(question)},
+		[]gocode.Message{gocode.NewUserMessage(question)},
 		tools,
 		5,
 	)
