@@ -78,6 +78,49 @@ func New(cfg Config) (*Editor, error) {
 	return &Editor{root: abs, maxChars: maxChars, maxFileBytes: maxBytes}, nil
 }
 
+// Toolset returns a single-binding toolset exposing the editor as a regular
+// function-call tool (named "str_replace_based_edit_tool"). Use this for
+// providers that don't support Anthropic's trained text_editor_20250728
+// schema (e.g. OpenAI, OpenRouter).
+func (e *Editor) Toolset() gocode.Toolset {
+	schema := gocode.InputSchema{
+		Type: "object",
+		Properties: map[string]gocode.SchemaProperty{
+			"command":        {Type: "string", Description: "One of: view, str_replace, create, insert."},
+			"path":           {Type: "string", Description: "File path relative to the workspace root."},
+			"old_str":        {Type: "string", Description: "For str_replace: the exact existing substring to replace. Must be unique."},
+			"new_str":        {Type: "string", Description: "For str_replace and insert: the new text."},
+			"file_text":      {Type: "string", Description: "For create: the full contents of the new file."},
+			"insert_line":    {Type: "integer", Description: "For insert: the 0-indexed line number after which to insert (0 = beginning)."},
+			"view_range":     {Type: "array", Description: "For view: optional [start, end] 1-indexed inclusive line range."},
+			"max_characters": {Type: "integer", Description: "For view: cap on bytes returned."},
+		},
+		Required: []string{"command", "path"},
+	}
+	desc := "View, create, or edit files in the workspace. Commands: view (read file or list directory), str_replace (in-place exact-string replacement; old_str must be unique), create (write new file; refuses to overwrite), insert (insert new_str after insert_line)."
+	tool, fn := gocode.NewTypedTool("str_replace_based_edit_tool", desc, schema, func(ctx context.Context, in editorInput) (string, error) {
+		return e.dispatch(in)
+	})
+	return gocode.Tools(gocode.ToolBinding{Tool: tool, Func: fn, Meta: gocode.ToolMetadata{RequiresConfirmation: true}})
+}
+
+func (e *Editor) dispatch(in editorInput) (string, error) {
+	switch in.Command {
+	case "view":
+		return e.view(in)
+	case "str_replace":
+		return e.strReplace(in)
+	case "create":
+		return e.create(in)
+	case "insert":
+		return e.insert(in)
+	case "":
+		return "", fmt.Errorf("editor: command is required")
+	default:
+		return "", fmt.Errorf("editor: unsupported command %q (want view|str_replace|create|insert)", in.Command)
+	}
+}
+
 // Handler returns a ToolFunc suitable for anthropic.TextEditor20250728.
 func (e *Editor) Handler() gocode.ToolFunc {
 	return func(ctx context.Context, raw json.RawMessage) (string, error) {

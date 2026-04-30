@@ -4,11 +4,15 @@ A fast, economical CLI coding agent built on the gocode toolkit. Inspired by Cla
 
 ## Install / run
 
-You'll need an Anthropic API key in your environment for any of these:
+You'll need an OpenRouter API key in your environment for any of these:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export OPENROUTER_API_KEY=sk-or-...
 ```
+
+Models default to Anthropic's Claude routes on OpenRouter, but `-model`,
+`-explore-model`, and `-plan-model` accept any OpenRouter slug
+(e.g. `openai/gpt-5`, `google/gemini-2.5-pro`).
 
 ### Option A — install once, run anywhere (recommended)
 
@@ -65,14 +69,14 @@ gocode -dir . -log auto
 
 You should see:
 ```
-gocode  model=claude-sonnet-4-6  bash=restricted  subagents=on  dir=/abs/path
-        explore=claude-haiku-4-5-20251001  plan=claude-opus-4-7
+gocode  model=anthropic/claude-sonnet-4.6  bash=restricted  subagents=on  dir=/abs/path
+        explore=anthropic/claude-haiku-4.5  plan=anthropic/claude-opus-4.7
         log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
 type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
 > 
 ```
 
-If you get `anthropic provider: ANTHROPIC_API_KEY environment variable is not set`, you missed the `export` step.
+If you get `openrouter provider: OPENROUTER_API_KEY environment variable is not set`, you missed the `export` step.
 
 ## What's running
 
@@ -91,17 +95,15 @@ Why three agents? Cost tiering and context isolation. The main Sonnet decides wh
 | Tool | What it does | Confirmation |
 |---|---|---|
 | `list_directory`, `Glob`, `Grep`, `read_file`, `file_info` | Read-only filesystem inspection (workspace package) | no |
-| `str_replace_based_edit_tool` | Anthropic's trained text editor: view / create / str_replace / insert | yes |
-| `bash` | Anthropic's trained bash, sandboxed by `-bash` mode | yes (in standard/unrestricted modes) |
+| `str_replace_based_edit_tool` | Text editor: view / create / str_replace / insert | yes |
+| `bash` | Sandboxed shell, governed by `-bash` mode | yes (in standard/unrestricted modes) |
 | `todo_write`, `todo_read` | Planning checklist; replace-whole-list semantics | no |
 | `batch` | Run several read-only tool calls concurrently in one turn | no |
-| `web_search` | Anthropic-hosted web search (server-executed) | no |
-| `web_fetch` | Anthropic-hosted URL fetch (server-executed) | no |
 | `now` | Current time | no |
 | `explore(task)` | Delegate inspection to a Haiku-backed subagent | no |
 | `plan(task)` | Delegate hard reasoning to an Opus-backed subagent | no |
 
-`Glob` and `Grep` use the same names Claude Code uses, so the model recognises them immediately. `web_search` and `web_fetch` are server-executed by Anthropic — no handler runs locally; results stream back inline. Disable them with `-no-web` if you want fully offline runs.
+`Glob` and `Grep` use the same names Claude Code uses, so the model recognises them immediately. Server-hosted web search/fetch are not currently wired through the OpenRouter provider; pair the agent with `bash` + `curl` if you need URL fetching.
 
 The `explore` and `plan` subagents are themselves agents with their own toolsets — the main agent can ask them anything within their scope.
 
@@ -133,11 +135,11 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | Flag | Default | Description |
 |---|---|---|
 | `-dir` | `.` | Working directory the agent is sandboxed to |
-| `-model` | `claude-sonnet-4-6` | Main-agent model |
-| `-explore-model` | `claude-haiku-4-5-20251001` | Model for the explore subagent |
-| `-plan-model` | `claude-opus-4-7` | Model for the plan subagent |
+| `-model` | `anthropic/claude-sonnet-4.6` | Main-agent model (any OpenRouter slug) |
+| `-explore-model` | `anthropic/claude-haiku-4.5` | Model for the explore subagent |
+| `-plan-model` | `anthropic/claude-opus-4.7` | Model for the plan subagent |
 | `-no-subagents` | false | Disable the explore and plan tools |
-| `-no-web` | false | Disable the Anthropic-hosted `web_search` and `web_fetch` tools |
+| `-no-web` | false | Deprecated no-op (kept for flag compatibility) |
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |
 | `-yes` | false | Auto-approve every confirmation prompt |
 | `-max-iter` | 30 | Max model calls per user turn |

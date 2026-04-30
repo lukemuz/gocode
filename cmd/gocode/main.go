@@ -19,8 +19,13 @@
 //
 // Usage:
 //
-//	export ANTHROPIC_API_KEY=sk-ant-...
+//	export OPENROUTER_API_KEY=sk-or-...
 //	go run ./cmd/gocode -dir . -bash standard
+//
+// Models default to Anthropic Claude routes on OpenRouter
+// (anthropic/claude-sonnet-4.6, anthropic/claude-haiku-4.5,
+// anthropic/claude-opus-4.7). Override with -model / -explore-model /
+// -plan-model to use any OpenRouter-supported model id.
 //
 // Flags:
 //
@@ -57,7 +62,7 @@ import (
 	"time"
 
 	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/gocode/providers/openrouter"
 	"github.com/lukemuz/gocode/tools/bash"
 	"github.com/lukemuz/gocode/tools/batch"
 	"github.com/lukemuz/gocode/tools/clock"
@@ -71,11 +76,10 @@ const mainSystemPrompt = `You are gocode, a fast and economical CLI coding assis
 
 You operate inside a workspace directory. Available tools:
 - list_directory, Glob, Grep, read_file, file_info: read-only filesystem inspection
-- str_replace_based_edit_tool: view/create/str_replace/insert against files (Anthropic's trained editor)
-- bash: run shell commands (Anthropic's trained bash; safety policy varies by configuration)
+- str_replace_based_edit_tool: view/create/str_replace/insert against files
+- bash: run shell commands (safety policy varies by configuration)
 - todo_write, todo_read: maintain a short planning checklist for multi-step work
 - batch: run several read-only tool calls concurrently in one turn (great for fanning out greps and reads)
-- web_search, web_fetch (when available): Anthropic-hosted tools for searching the web and fetching specific URLs (e.g. library docs)
 - explore (when available): delegate inspection to a faster, cheaper specialist that returns a summary
 - plan (when available): delegate hard reasoning or design questions to a stronger model
 - now: current time
@@ -113,11 +117,11 @@ Operating principles:
 
 func main() {
 	dir := flag.String("dir", ".", "working directory the agent is sandboxed to")
-	model := flag.String("model", gocode.ModelSonnet, "main-agent model id")
-	exploreModel := flag.String("explore-model", gocode.ModelHaiku, "model id for the explore subagent")
-	planModel := flag.String("plan-model", gocode.ModelOpus, "model id for the plan subagent")
+	model := flag.String("model", "anthropic/claude-sonnet-4.6", "main-agent model id (any OpenRouter slug)")
+	exploreModel := flag.String("explore-model", "anthropic/claude-haiku-4.5", "model id for the explore subagent")
+	planModel := flag.String("plan-model", "anthropic/claude-opus-4.7", "model id for the plan subagent")
 	noSubagents := flag.Bool("no-subagents", false, "disable explore and plan subagent tools")
-	noWeb := flag.Bool("no-web", false, "disable Anthropic-hosted web_search and web_fetch tools")
+	_ = flag.Bool("no-web", false, "deprecated no-op (server-hosted web tools are not wired for OpenRouter)")
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
 	autoYes := flag.Bool("yes", false, "auto-approve every confirmation prompt")
 	maxIter := flag.Int("max-iter", 30, "max model calls per turn")
@@ -132,9 +136,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	provider, err := anthropic.NewProviderFromEnv()
+	provider, err := openrouter.NewProviderFromEnv()
 	if err != nil {
-		log.Fatalf("anthropic provider: %v", err)
+		log.Fatalf("openrouter provider: %v", err)
 	}
 
 	mainClient := mustClient(provider, *model)
@@ -190,8 +194,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	subBashBinding := anthropic.BashTool(subBashTool.TrainedHandler())
-	subBashToolset := gocode.Tools(subBashBinding).Wrap(roMiddleware...)
+	subBashToolset := subBashTool.Toolset().Wrap(roMiddleware...)
 
 	// Batch tool for read-only fan-out. Built from already-wrapped read-only
 	// bindings so each sub-call inherits the timeout/limit/logging stack.
@@ -240,16 +243,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mainBashBinding := anthropic.BashTool(mainBashTool.TrainedHandler())
-	mainBashBinding.Meta.RequiresConfirmation = mainBashTool.Toolset().Bindings[0].Meta.RequiresConfirmation
+	mainBashBindings := mainBashTool.Toolset().Bindings
 
 	ed, err := editor.New(editor.Config{Root: *dir})
 	if err != nil {
 		log.Fatal(err)
 	}
-	editorBinding := anthropic.TextEditor20250728(ed.Handler())
+	editorBindings := ed.Toolset().Bindings
 
-	editTools := gocode.Tools(mainBashBinding, editorBinding).Wrap(
+	editTools := gocode.Tools(append(mainBashBindings, editorBindings...)...).Wrap(
 		gocode.WithConfirmation(confirm),
 		gocode.WithTimeout(60*time.Second),
 		gocode.WithResultLimit(64*1024),
@@ -265,16 +267,6 @@ func main() {
 		todo.New().Toolset(),
 		gocode.Tools(subagentBindings...),
 	).CacheLast(gocode.Ephemeral()) // cache the entire tool block — stable per session
-
-	// Anthropic's hosted web tools — server-executed by the API, no Go
-	// handler needed. Useful for documentation lookups and reading
-	// arbitrary URLs the model encounters in error messages or notes.
-	if !*noWeb {
-		mainTools = mainTools.WithProviderTools(
-			anthropic.WebSearch(anthropic.WebSearchOpts{MaxUses: 5}),
-			anthropic.WebFetch(anthropic.WebFetchOpts{MaxUses: 5, MaxContentTokens: 8000}),
-		)
-	}
 
 	memory := loadProjectMemory(*dir)
 	system := mainSystemPrompt
@@ -296,7 +288,7 @@ func main() {
 
 	// Summarizer for /compact runs on Haiku — cheap and plenty capable
 	// for transcript summarization. Independent of the user's main model.
-	summarizer := mainClient.WithModel(gocode.ModelHaiku)
+	summarizer := mainClient.WithModel("anthropic/claude-haiku-4.5")
 
 	// --- run ---------------------------------------------------------------
 
