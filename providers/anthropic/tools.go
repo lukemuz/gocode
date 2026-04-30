@@ -54,9 +54,14 @@ type WebSearchOpts struct {
 // web_search tool to the model. The Anthropic API performs the search and
 // inlines the results as web_search_tool_result content blocks; the agent
 // loop transparently round-trips them via gocode.ContentBlock.Raw.
+//
+// Uses "web_search_20260209" — the dynamic-filtering generation. The prior
+// "web_search_20250305" remains accepted by the API for callers that want
+// the static-results behaviour. Bump this string when Anthropic ships a
+// newer dated identifier.
 func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
 	body := map[string]any{
-		"type": "web_search_20250305",
+		"type": "web_search_20260209",
 		"name": "web_search",
 	}
 	if opts.MaxUses > 0 {
@@ -95,11 +100,16 @@ type WebFetchOpts struct {
 
 // WebFetch returns a gocode.ProviderTool that advertises Anthropic's hosted
 // web_fetch tool to the model. The Anthropic API performs the fetch and
-// inlines the result. The dated identifier is "web_fetch_20250910"; bump
-// here when Anthropic ships a newer version.
+// inlines the result.
+//
+// Uses "web_fetch_20260209" — the dynamic-filtering generation, supported
+// on Claude Opus 4.6+ and Sonnet 4.6+. Dynamic filtering only activates
+// when the code_execution tool is also enabled; without it, behaviour
+// matches the prior "web_fetch_20250910" version. Bump this string when
+// Anthropic ships a newer dated identifier.
 func WebFetch(opts WebFetchOpts) gocode.ProviderTool {
 	body := map[string]any{
-		"type": "web_fetch_20250910",
+		"type": "web_fetch_20260209",
 		"name": "web_fetch",
 	}
 	if opts.MaxUses > 0 {
