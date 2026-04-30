@@ -2,8 +2,8 @@
 // at a configurable directory. All path arguments are resolved relative to the
 // root and validated to prevent directory traversal.
 //
-// Use NewReadOnly for the five read-only tools (list_directory, find_files,
-// search_text, read_file, file_info). Use New to also include edit_file; pair
+// Use NewReadOnly for the five read-only tools (list_directory, Glob,
+// Grep, read_file, file_info). Use New to also include edit_file; pair
 // it with the gocode.WithConfirmation middleware to gate writes.
 package workspace
 
@@ -39,8 +39,8 @@ type Config struct {
 	// default (1 MiB).
 	MaxFileBytes int64
 
-	// MaxResults caps the number of entries returned by find_files and
-	// search_text. 0 uses the default (100).
+	// MaxResults caps the number of entries returned by Glob and
+	// Grep. 0 uses the default (100).
 	MaxResults int
 }
 
@@ -79,7 +79,7 @@ func New(cfg Config) (*Workspace, error) {
 }
 
 // NewReadOnly creates a Workspace with the five core read-only tools:
-// list_directory, find_files, search_text, read_file, and file_info.
+// list_directory, Glob, Grep, read_file, and file_info.
 // Returns an error if cfg.Root is empty or cannot be resolved to an
 // absolute path.
 func NewReadOnly(cfg Config) (*Workspace, error) {
@@ -207,7 +207,7 @@ func (w *Workspace) buildBindings() []gocode.ToolBinding {
 	)
 
 	findFilesTool := gocode.NewTool(
-		"find_files",
+		"Glob",
 		"Finds files whose names match a glob pattern under a path relative to the workspace root. "+
 			"Results are root-relative slash paths. Capped at the configured MaxResults limit.",
 		gocode.Object(
@@ -217,7 +217,7 @@ func (w *Workspace) buildBindings() []gocode.ToolBinding {
 	)
 
 	searchTextTool := gocode.NewTool(
-		"search_text",
+		"Grep",
 		"Searches file contents for lines matching a regular expression. "+
 			"Returns matching lines as \"file:line: content\" entries. "+
 			"Capped at MaxResults matches.",
@@ -317,7 +317,7 @@ func (w *Workspace) findFiles(_ context.Context, in findFilesInput) (string, err
 	}
 	pattern := in.Pattern
 	if pattern == "" {
-		return "", fmt.Errorf("find_files: pattern is required")
+		return "", fmt.Errorf("Glob: pattern is required")
 	}
 
 	var matches []string
@@ -338,7 +338,7 @@ func (w *Workspace) findFiles(_ context.Context, in findFilesInput) (string, err
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("find_files: %w", err)
+		return "", fmt.Errorf("Glob: %w", err)
 	}
 	return gocode.JSONResult(matches)
 }
@@ -353,11 +353,11 @@ func (w *Workspace) searchText(_ context.Context, in searchTextInput) (string, e
 		return "", err
 	}
 	if in.Pattern == "" {
-		return "", fmt.Errorf("search_text: pattern is required")
+		return "", fmt.Errorf("Grep: pattern is required")
 	}
 	re, err := regexp.Compile(in.Pattern)
 	if err != nil {
-		return "", fmt.Errorf("search_text: invalid pattern: %w", err)
+		return "", fmt.Errorf("Grep: invalid pattern: %w", err)
 	}
 
 	type match struct {
@@ -405,7 +405,7 @@ func (w *Workspace) searchText(_ context.Context, in searchTextInput) (string, e
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("search_text: %w", err)
+		return "", fmt.Errorf("Grep: %w", err)
 	}
 	return gocode.JSONResult(matches)
 }

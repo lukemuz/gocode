@@ -32,14 +32,18 @@ Why three agents? Cost tiering and context isolation. The main Sonnet decides wh
 
 | Tool | What it does | Confirmation |
 |---|---|---|
-| `list_directory`, `find_files`, `search_text`, `read_file`, `file_info` | Read-only filesystem inspection (workspace package) | no |
+| `list_directory`, `Glob`, `Grep`, `read_file`, `file_info` | Read-only filesystem inspection (workspace package) | no |
 | `str_replace_based_edit_tool` | Anthropic's trained text editor: view / create / str_replace / insert | yes |
 | `bash` | Anthropic's trained bash, sandboxed by `-bash` mode | yes (in standard/unrestricted modes) |
 | `todo_write`, `todo_read` | Planning checklist; replace-whole-list semantics | no |
 | `batch` | Run several read-only tool calls concurrently in one turn | no |
+| `web_search` | Anthropic-hosted web search (server-executed) | no |
+| `web_fetch` | Anthropic-hosted URL fetch (server-executed) | no |
 | `now` | Current time | no |
 | `explore(task)` | Delegate inspection to a Haiku-backed subagent | no |
 | `plan(task)` | Delegate hard reasoning to an Opus-backed subagent | no |
+
+`Glob` and `Grep` use the same names Claude Code uses, so the model recognises them immediately. `web_search` and `web_fetch` are server-executed by Anthropic — no handler runs locally; results stream back inline. Disable them with `-no-web` if you want fully offline runs.
 
 The `explore` and `plan` subagents are themselves agents with their own toolsets — the main agent can ask them anything within their scope.
 
@@ -75,6 +79,7 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | `-explore-model` | `claude-haiku-4-5-20251001` | Model for the explore subagent |
 | `-plan-model` | `claude-opus-4-7` | Model for the plan subagent |
 | `-no-subagents` | false | Disable the explore and plan tools |
+| `-no-web` | false | Disable the Anthropic-hosted `web_search` and `web_fetch` tools |
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |
 | `-yes` | false | Auto-approve every confirmation prompt |
 | `-max-iter` | 30 | Max model calls per user turn |

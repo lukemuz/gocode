@@ -53,11 +53,11 @@ func TestRenderTranscriptIncludesAllRoles(t *testing.T) {
 		gocode.NewUserMessage("hello"),
 		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{
 			{Type: gocode.TypeText, Text: "thinking"},
-			{Type: gocode.TypeToolUse, ID: "abc", Name: "search_text", Input: []byte(`{"q":"foo"}`)},
+			{Type: gocode.TypeToolUse, ID: "abc", Name: "Grep", Input: []byte(`{"q":"foo"}`)},
 		}},
 	}
 	out := renderTranscript(h)
-	for _, want := range []string{"## user", "## assistant", "hello", "thinking", "tool_use search_text"} {
+	for _, want := range []string{"## user", "## assistant", "hello", "thinking", "tool_use Grep"} {
 		if !contains(out, want) {
 			t.Fatalf("missing %q in:\n%s", want, out)
 		}

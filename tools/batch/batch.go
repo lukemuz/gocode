@@ -7,7 +7,7 @@
 // dominated by network latency. With batch, all four run in one turn:
 //
 //	{"calls": [
-//	   {"name": "search_text",   "input": {"pattern": "FooBar"}},
+//	   {"name": "Grep",   "input": {"pattern": "FooBar"}},
 //	   {"name": "read_file",     "input": {"path": "a.go"}},
 //	   {"name": "read_file",     "input": {"path": "b.go"}},
 //	   {"name": "list_directory","input": {"path": "internal/"}}
@@ -64,7 +64,7 @@ func New(cfg Config) gocode.ToolBinding {
 	}
 
 	desc := fmt.Sprintf(
-		"Run multiple read-only tool calls concurrently in a single turn. Use this to fan out reads, searches, and inspections — e.g. one search_text + several read_file + a list_directory in parallel. Each entry in 'calls' is dispatched independently and all results are returned together. Allowed tools: %s. Confirmation-gated tools (edits, shell) are NOT allowed and must be invoked directly.",
+		"Run multiple read-only tool calls concurrently in a single turn. Use this to fan out reads, searches, and inspections — e.g. one Grep + several read_file + a list_directory in parallel. Each entry in 'calls' is dispatched independently and all results are returned together. Allowed tools: %s. Confirmation-gated tools (edits, shell) are NOT allowed and must be invoked directly.",
 		strings.Join(allowed, ", "),
 	)
 
