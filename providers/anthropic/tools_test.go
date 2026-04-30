@@ -76,8 +76,8 @@ func TestWebSearch_WireForm(t *testing.T) {
 		t.Fatalf("tools missing or wrong length: %v", sent["tools"])
 	}
 	got := tools[0].(map[string]any)
-	if got["type"] != "web_search_20250305" {
-		t.Errorf("type = %v, want web_search_20250305", got["type"])
+	if got["type"] != "web_search_20260209" {
+		t.Errorf("type = %v, want web_search_20260209", got["type"])
 	}
 	if got["name"] != "web_search" {
 		t.Errorf("name = %v, want web_search", got["name"])
@@ -251,7 +251,7 @@ func TestToolMixWithStandardTool(t *testing.T) {
 		t.Errorf("expected bash declaration second, got %v", second)
 	}
 	third := tools[2].(map[string]any)
-	if third["type"] != "web_search_20250305" {
+	if third["type"] != "web_search_20260209" {
 		t.Errorf("expected web_search third, got %v", third)
 	}
 }

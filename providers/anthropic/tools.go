@@ -54,9 +54,14 @@ type WebSearchOpts struct {
 // web_search tool to the model. The Anthropic API performs the search and
 // inlines the results as web_search_tool_result content blocks; the agent
 // loop transparently round-trips them via gocode.ContentBlock.Raw.
+//
+// Uses "web_search_20260209" — the dynamic-filtering generation. The prior
+// "web_search_20250305" remains accepted by the API for callers that want
+// the static-results behaviour. Bump this string when Anthropic ships a
+// newer dated identifier.
 func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
 	body := map[string]any{
-		"type": "web_search_20250305",
+		"type": "web_search_20260209",
 		"name": "web_search",
 	}
 	if opts.MaxUses > 0 {
@@ -70,6 +75,57 @@ func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
 	}
 	if opts.UserLocation != nil {
 		body["user_location"] = opts.UserLocation
+	}
+	return gocode.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
+}
+
+// WebFetchOpts configures the Anthropic web_fetch server tool.
+type WebFetchOpts struct {
+	// MaxUses caps the number of fetch invocations per turn. 0 omits.
+	MaxUses int
+
+	// AllowedDomains restricts fetches to these domains.
+	AllowedDomains []string
+
+	// BlockedDomains excludes these domains.
+	BlockedDomains []string
+
+	// MaxContentTokens caps how much fetched content the model receives
+	// per fetch. 0 lets the API apply its default.
+	MaxContentTokens int
+
+	// Citations toggles inline citations on fetched content.
+	Citations bool
+}
+
+// WebFetch returns a gocode.ProviderTool that advertises Anthropic's hosted
+// web_fetch tool to the model. The Anthropic API performs the fetch and
+// inlines the result.
+//
+// Uses "web_fetch_20260209" — the dynamic-filtering generation, supported
+// on Claude Opus 4.6+ and Sonnet 4.6+. Dynamic filtering only activates
+// when the code_execution tool is also enabled; without it, behaviour
+// matches the prior "web_fetch_20250910" version. Bump this string when
+// Anthropic ships a newer dated identifier.
+func WebFetch(opts WebFetchOpts) gocode.ProviderTool {
+	body := map[string]any{
+		"type": "web_fetch_20260209",
+		"name": "web_fetch",
+	}
+	if opts.MaxUses > 0 {
+		body["max_uses"] = opts.MaxUses
+	}
+	if len(opts.AllowedDomains) > 0 {
+		body["allowed_domains"] = opts.AllowedDomains
+	}
+	if len(opts.BlockedDomains) > 0 {
+		body["blocked_domains"] = opts.BlockedDomains
+	}
+	if opts.MaxContentTokens > 0 {
+		body["max_content_tokens"] = opts.MaxContentTokens
+	}
+	if opts.Citations {
+		body["citations"] = map[string]any{"enabled": true}
 	}
 	return gocode.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
 }
@@ -124,6 +180,10 @@ func BashTool(fn gocode.ToolFunc) gocode.ToolBinding {
 // tool. The wire declaration is {"type": "text_editor_20250124", "name":
 // "str_replace_editor"}; the model emits "command" actions (view, create,
 // str_replace, insert, undo_edit) the handler must implement.
+//
+// This is the legacy variant. For Claude 4.x prefer TextEditor20250728,
+// which uses the newer name "str_replace_based_edit_tool", drops the
+// undo_edit command, and adds the max_characters parameter on view.
 func TextEditorTool(fn gocode.ToolFunc) gocode.ToolBinding {
 	body := map[string]any{
 		"type": "text_editor_20250124",
@@ -140,6 +200,39 @@ func TextEditorTool(fn gocode.ToolFunc) gocode.ToolBinding {
 		Meta: gocode.ToolMetadata{
 			Source:     "anthropic.text_editor_20250124",
 			Filesystem: true,
+		},
+	}
+}
+
+// TextEditor20250728 wraps a handler as Anthropic's latest text editor
+// tool. The wire declaration is {"type": "text_editor_20250728", "name":
+// "str_replace_based_edit_tool"}, supported on Claude 4.x. The model
+// emits four commands the handler must implement:
+//
+//   - view:        {path, view_range?: [start, end], max_characters?: int}
+//   - str_replace: {path, old_str, new_str}
+//   - create:      {path, file_text}
+//   - insert:      {path, insert_line, new_str}
+//
+// undo_edit was removed in this version. max_characters (added 2025-07-28)
+// caps how much of a viewed file is returned.
+func TextEditor20250728(fn gocode.ToolFunc) gocode.ToolBinding {
+	body := map[string]any{
+		"type": "text_editor_20250728",
+		"name": "str_replace_based_edit_tool",
+	}
+	tool := gocode.Tool{
+		Name:     "str_replace_based_edit_tool",
+		Provider: ProviderTag,
+		Raw:      mustMarshal(body),
+	}
+	return gocode.ToolBinding{
+		Tool: tool,
+		Func: fn,
+		Meta: gocode.ToolMetadata{
+			Source:               "anthropic.text_editor_20250728",
+			Filesystem:           true,
+			RequiresConfirmation: true,
 		},
 	}
 }

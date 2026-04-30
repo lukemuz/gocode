@@ -121,7 +121,7 @@ func TestListDirectoryTraversalRejected(t *testing.T) {
 func TestFindFiles(t *testing.T) {
 	root := setupTestDir(t)
 	ws := newWS(t, root)
-	out := callTool(t, ws, "find_files", map[string]any{"pattern": "*.go"})
+	out := callTool(t, ws, "Glob", map[string]any{"pattern": "*.go"})
 	var files []string
 	if err := json.Unmarshal([]byte(out), &files); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -134,7 +134,7 @@ func TestFindFiles(t *testing.T) {
 func TestFindFilesNoMatch(t *testing.T) {
 	root := setupTestDir(t)
 	ws := newWS(t, root)
-	out := callTool(t, ws, "find_files", map[string]any{"pattern": "*.rs"})
+	out := callTool(t, ws, "Glob", map[string]any{"pattern": "*.rs"})
 	var files []string
 	json.Unmarshal([]byte(out), &files)
 	if len(files) != 0 {
@@ -145,7 +145,7 @@ func TestFindFilesNoMatch(t *testing.T) {
 func TestSearchText(t *testing.T) {
 	root := setupTestDir(t)
 	ws := newWS(t, root)
-	out := callTool(t, ws, "search_text", map[string]any{
+	out := callTool(t, ws, "Grep", map[string]any{
 		"pattern": "func",
 		"include": "*.go",
 	})
@@ -167,7 +167,7 @@ func TestSearchTextInvalidPattern(t *testing.T) {
 	ws := newWS(t, root)
 	dispatch := ws.Dispatch()
 	raw, _ := json.Marshal(map[string]any{"pattern": "["}) // invalid regex
-	_, err := dispatch["search_text"](context.Background(), raw)
+	_, err := dispatch["Grep"](context.Background(), raw)
 	if err == nil {
 		t.Fatal("want error for invalid regex, got nil")
 	}
