@@ -18,11 +18,26 @@ const (
 	anthropicDefaultBaseURL = "https://api.anthropic.com"
 	anthropicVersion        = "2023-06-01"
 	defaultHTTPTimeout      = 60 * time.Second
+
+	// oauthBetaHeader is the Anthropic-side opt-in required when
+	// authenticating with a Claude subscription OAuth token instead of an
+	// API key. Sent as the value of the "anthropic-beta" header.
+	oauthBetaHeader = "oauth-2025-04-20"
+
+	// claudeCodeIdentityPrompt is the leading system block the API
+	// requires for OAuth-authenticated requests. The Anthropic OAuth
+	// scopes only authorize traffic that identifies as Claude Code, so
+	// every request prepends this block when OAuthToken is set.
+	claudeCodeIdentityPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
-// Config holds configuration for the Anthropic provider.
+// Config holds configuration for the Anthropic provider. Exactly one of
+// APIKey or OAuthToken must be set: APIKey routes traffic through the
+// pay-as-you-go Anthropic API, OAuthToken authenticates against a
+// Claude Pro/Max subscription using the same OAuth flow Claude Code uses.
 type Config struct {
-	APIKey     string       // required
+	APIKey     string       // pay-as-you-go API key (sk-ant-api...)
+	OAuthToken string       // Claude subscription OAuth access token (sk-ant-oat...)
 	BaseURL    string       // defaults to https://api.anthropic.com
 	HTTPClient *http.Client // defaults to a 60-second timeout client
 }
@@ -32,11 +47,14 @@ type Provider struct {
 	cfg Config
 }
 
-// NewProvider creates an Provider, filling in defaults.
-// Returns an error if APIKey is empty.
+// NewProvider creates a Provider, filling in defaults. Exactly one of
+// Config.APIKey or Config.OAuthToken must be set.
 func NewProvider(cfg Config) (*Provider, error) {
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("gocode: Config.APIKey is required")
+	switch {
+	case cfg.APIKey != "" && cfg.OAuthToken != "":
+		return nil, fmt.Errorf("gocode: anthropic Config: set APIKey or OAuthToken, not both")
+	case cfg.APIKey == "" && cfg.OAuthToken == "":
+		return nil, fmt.Errorf("gocode: anthropic Config: APIKey or OAuthToken is required")
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = anthropicDefaultBaseURL
@@ -47,16 +65,32 @@ func NewProvider(cfg Config) (*Provider, error) {
 	return &Provider{cfg: cfg}, nil
 }
 
-// NewProviderFromEnv creates an Provider using the
-// ANTHROPIC_API_KEY environment variable. Returns an error if the variable
-// is unset or empty. Use this when you need to supply a custom Config to
-// gocode.New; otherwise prefer NewClientFromEnv.
+// NewProviderFromEnv creates a Provider using the ANTHROPIC_API_KEY
+// environment variable. Returns an error if the variable is unset or empty.
+// Use this when you need to supply a custom Config to gocode.New; otherwise
+// prefer NewClientFromEnv. For Claude subscription auth, see
+// LoadClaudeCredentials and NewProvider with Config.OAuthToken.
 func NewProviderFromEnv() (*Provider, error) {
 	key := os.Getenv("ANTHROPIC_API_KEY")
 	if key == "" {
 		return nil, fmt.Errorf("gocode: ANTHROPIC_API_KEY environment variable is not set")
 	}
 	return NewProvider(Config{APIKey: key})
+}
+
+// useOAuth reports whether this provider authenticates via a Claude
+// subscription OAuth token rather than an API key.
+func (p *Provider) useOAuth() bool { return p.cfg.OAuthToken != "" }
+
+// applyAuthHeaders writes the auth-related headers appropriate to whichever
+// credential mode this provider was constructed with.
+func (p *Provider) applyAuthHeaders(h http.Header) {
+	if p.useOAuth() {
+		h.Set("authorization", "Bearer "+p.cfg.OAuthToken)
+		h.Set("anthropic-beta", oauthBetaHeader)
+		return
+	}
+	h.Set("x-api-key", p.cfg.APIKey)
 }
 
 // NewClientFromEnv creates a Client backed by the Anthropic provider,
@@ -105,14 +139,33 @@ type anthropicSystemBlock struct {
 // When SystemCache is set and the prompt is non-empty, emit the array form
 // so cache_control rides along; otherwise emit a plain string (or nil for
 // an empty prompt, which omitempty drops).
-func anthropicSystem(text string, cache *gocode.CacheControl) any {
-	if text == "" {
-		return nil
+//
+// When oauth is true, the array form is always used and the Claude Code
+// identity block is prepended — Anthropic's OAuth scope only authorizes
+// requests that identify as Claude Code, so omitting the prefix yields
+// auth errors. Any cache breakpoint is attached to the caller's prompt
+// block (kept stable per session) rather than the identity block.
+func anthropicSystem(text string, cache *gocode.CacheControl, oauth bool) any {
+	if !oauth {
+		if text == "" {
+			return nil
+		}
+		if cache != nil {
+			return []anthropicSystemBlock{{Type: "text", Text: text, CacheControl: cache}}
+		}
+		return text
 	}
-	if cache != nil {
-		return []anthropicSystemBlock{{Type: "text", Text: text, CacheControl: cache}}
+	blocks := []anthropicSystemBlock{{Type: "text", Text: claudeCodeIdentityPrompt}}
+	if text != "" {
+		b := anthropicSystemBlock{Type: "text", Text: text}
+		if cache != nil {
+			b.CacheControl = cache
+		}
+		blocks = append(blocks, b)
+	} else if cache != nil {
+		blocks[0].CacheControl = cache
 	}
-	return text
+	return blocks
 }
 
 // ProviderTag is the value gocode.Tool.Provider and gocode.ProviderTool.Provider
@@ -175,7 +228,7 @@ func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    anthropicSystem(req.System, req.SystemCache),
+		System:    anthropicSystem(req.System, req.SystemCache, p.useOAuth()),
 		Messages:  req.Messages,
 		Tools:     tools,
 	}
@@ -191,7 +244,7 @@ func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode
 		return gocode.ProviderResponse{}, fmt.Errorf("gocode: anthropic: build request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("x-api-key", p.cfg.APIKey)
+	p.applyAuthHeaders(httpReq.Header)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
 
 	resp, err := p.cfg.HTTPClient.Do(httpReq)
@@ -236,7 +289,7 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 	wireReq := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    anthropicSystem(req.System, req.SystemCache),
+		System:    anthropicSystem(req.System, req.SystemCache, p.useOAuth()),
 		Messages:  req.Messages,
 		Tools:     tools,
 		Stream:    true,
@@ -253,7 +306,7 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 		return gocode.ProviderResponse{}, fmt.Errorf("gocode: anthropic: build stream request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("x-api-key", p.cfg.APIKey)
+	p.applyAuthHeaders(httpReq.Header)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
 	httpReq.Header.Set("accept", "text/event-stream")
 

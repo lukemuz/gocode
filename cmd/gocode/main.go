@@ -17,9 +17,16 @@
 // reads/searches concurrently in a single turn without paying for a
 // subagent loop.
 //
+// Status: beta / experimental. Surface area is unstable.
+//
 // Usage:
 //
+//	# Pay-as-you-go API:
 //	export ANTHROPIC_API_KEY=sk-ant-...
+//	# Or a Claude Pro/Max subscription OAuth token:
+//	export ANTHROPIC_AUTH_TOKEN=sk-ant-oat...
+//	# Or just run Claude Code's /login once on Linux/Windows; the
+//	# CLI reuses ~/.claude/.credentials.json automatically.
 //	go run ./cmd/gocode -dir . -bash standard
 //
 // Flags:
@@ -45,6 +52,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -132,7 +140,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	provider, err := anthropic.NewProviderFromEnv()
+	provider, authLabel, err := resolveAnthropicProvider()
 	if err != nil {
 		log.Fatalf("anthropic provider: %v", err)
 	}
@@ -305,12 +313,13 @@ func main() {
 	if *noSubagents {
 		subStatus = "off"
 	}
-	fmt.Fprintf(os.Stderr, "gocode  model=%s  bash=%s  subagents=%s  dir=%s\n", *model, *bashMode, subStatus, abs)
+	fmt.Fprintln(os.Stderr, "gocode (beta) — experimental CLI built on the gocode toolkit")
+	fmt.Fprintf(os.Stderr, "  auth=%s  model=%s  bash=%s  subagents=%s  dir=%s\n", authLabel, *model, *bashMode, subStatus, abs)
 	if !*noSubagents {
-		fmt.Fprintf(os.Stderr, "        explore=%s  plan=%s\n", *exploreModel, *planModel)
+		fmt.Fprintf(os.Stderr, "  explore=%s  plan=%s\n", *exploreModel, *planModel)
 	}
 	if resolvedLog != "" {
-		fmt.Fprintf(os.Stderr, "        log=%s\n", resolvedLog)
+		fmt.Fprintf(os.Stderr, "  log=%s\n", resolvedLog)
 	}
 	fmt.Fprintln(os.Stderr, "type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.")
 
@@ -341,6 +350,42 @@ func resolveLogPath(spec string) (string, error) {
 	}
 	stamp := time.Now().Format("2006-01-02T15-04-05")
 	return filepath.Join(dir, stamp+".jsonl"), nil
+}
+
+// resolveAnthropicProvider builds an anthropic.Provider, picking
+// credentials from (in order): ANTHROPIC_API_KEY (pay-as-you-go API),
+// ANTHROPIC_AUTH_TOKEN (OAuth bearer token, e.g. for macOS users who
+// can't read the credentials file), and ~/.claude/.credentials.json
+// (the OAuth credentials Claude Code's /login writes on Linux/Windows).
+//
+// Returns the provider plus a short human-readable label describing
+// which source was used, for the startup banner.
+func resolveAnthropicProvider() (*anthropic.Provider, string, error) {
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		p, err := anthropic.NewProvider(anthropic.Config{APIKey: key})
+		return p, "ANTHROPIC_API_KEY (api)", err
+	}
+	if tok := os.Getenv("ANTHROPIC_AUTH_TOKEN"); tok != "" {
+		p, err := anthropic.NewProvider(anthropic.Config{OAuthToken: tok})
+		return p, "ANTHROPIC_AUTH_TOKEN (subscription)", err
+	}
+	creds, err := anthropic.LoadClaudeCredentials()
+	if err == nil {
+		if creds.Expired() {
+			return nil, "", fmt.Errorf("Claude Code OAuth token at ~/.claude/.credentials.json expired at %s — re-run `claude` (the Claude Code CLI) to refresh, or unset and use ANTHROPIC_API_KEY",
+				creds.ExpiresAt.Format(time.RFC3339))
+		}
+		p, err := anthropic.NewProvider(anthropic.Config{OAuthToken: creds.AccessToken})
+		label := "Claude Code subscription"
+		if creds.SubscriptionType != "" {
+			label = fmt.Sprintf("Claude Code subscription (%s)", creds.SubscriptionType)
+		}
+		return p, label, err
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, "", fmt.Errorf("read ~/.claude/.credentials.json: %w", err)
+	}
+	return nil, "", errors.New("no Anthropic credentials found. Set ANTHROPIC_API_KEY (pay-as-you-go), ANTHROPIC_AUTH_TOKEN (subscription OAuth token), or run Claude Code's /login to populate ~/.claude/.credentials.json")
 }
 
 func mustClient(provider gocode.Provider, model string) *gocode.Client {

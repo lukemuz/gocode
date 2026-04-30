@@ -2,13 +2,42 @@
 
 A fast, economical CLI coding agent built on the gocode toolkit. Inspired by Claude Code; written in Go; opinionated about cost and parallelism out of the box.
 
+> **Status: beta / experimental.** The CLI works end-to-end and is what we use day to day, but the surface area is unstable and bugs are expected. Flags, slash commands, the JSONL log schema, and subscription-auth behaviour may change without warning. File issues — early users are very welcome.
+
 ## Install / run
 
-You'll need an Anthropic API key in your environment for any of these:
+You need Anthropic credentials in your environment. The CLI tries three sources, in order:
+
+1. **`ANTHROPIC_API_KEY`** — pay-as-you-go API access. The well-trodden path.
+2. **`ANTHROPIC_AUTH_TOKEN`** — a Claude subscription OAuth access token, set explicitly. Useful on macOS, where Claude Code stores its credentials in the Keychain rather than on disk.
+3. **`~/.claude/.credentials.json`** — the OAuth credentials Claude Code's `/login` writes on Linux/Windows. If that file exists and the token isn't expired, gocode reuses it automatically — no extra config.
+
+Pick whichever fits:
 
 ```bash
+# Option 1: API billing
 export ANTHROPIC_API_KEY=sk-ant-...
+
+# Option 2: explicit subscription token
+export ANTHROPIC_AUTH_TOKEN=sk-ant-oat...
+
+# Option 3: subscription via Claude Code's stored credentials (Linux/Windows)
+#   Run Claude Code's /login once; gocode picks the token up automatically.
 ```
+
+### Using your Claude subscription (Pro / Max)
+
+If you already use Claude Code with a Pro or Max subscription, gocode can reuse the same OAuth credentials so usage counts against your subscription instead of an API bill.
+
+- **Linux / Windows:** run `claude` once and complete `/login`. Claude Code writes the token to `~/.claude/.credentials.json`. Start gocode with no `ANTHROPIC_API_KEY` set and it picks up the file automatically. The startup banner will read `auth=Claude Code subscription (max)` (or `pro`).
+- **macOS:** Claude Code stores credentials in the Keychain rather than on disk, so gocode can't read them automatically. Copy the access token out of the Keychain entry named **"Claude Code-credentials"** and export it as `ANTHROPIC_AUTH_TOKEN`.
+
+Caveats worth knowing:
+
+- **Token refresh isn't implemented yet.** Subscription tokens expire (typically every few hours). When that happens gocode prints the expiry timestamp and asks you to re-run Claude Code's `/login` to refresh; you'll then need to start a new gocode session. Refresh-on-demand is on the list.
+- **Subscriptions have rate limits.** Heavy parallel use (subagents fanning out greps, long sessions, big context windows) can trip your subscription's fair-use limits faster than you'd expect. If you hit them, fall back to `ANTHROPIC_API_KEY` for the session.
+- **System prompt is partially fixed.** The Anthropic OAuth scope only authorises traffic identifying as Claude Code, so gocode prepends a short `"You are Claude Code, Anthropic's official CLI for Claude."` block ahead of its own system prompt. The prepended block is stable per session and cached, so the cost is one-time.
+- **API key wins ties.** If `ANTHROPIC_API_KEY` is set, gocode uses it — even if subscription credentials are also available. Unset it to force the subscription path.
 
 ### Option A — install once, run anywhere (recommended)
 
@@ -65,14 +94,15 @@ gocode -dir . -log auto
 
 You should see:
 ```
-gocode  model=claude-sonnet-4-6  bash=restricted  subagents=on  dir=/abs/path
-        explore=claude-haiku-4-5-20251001  plan=claude-opus-4-7
-        log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
+gocode (beta) — experimental CLI built on the gocode toolkit
+  auth=ANTHROPIC_API_KEY (api)  model=claude-sonnet-4-6  bash=restricted  subagents=on  dir=/abs/path
+  explore=claude-haiku-4-5-20251001  plan=claude-opus-4-7
+  log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
 type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
 > 
 ```
 
-If you get `anthropic provider: ANTHROPIC_API_KEY environment variable is not set`, you missed the `export` step.
+The `auth=...` field shows which credential source was picked. If you get `anthropic provider: no Anthropic credentials found ...`, none of the three sources resolved; double-check your environment.
 
 ## What's running
 
@@ -212,6 +242,7 @@ Sonnet should call `plan` to escalate to Opus for the design, then summarise bac
 - Auto-compaction at a context-window threshold
 - Persistent codebase index across sessions
 - Speculative inspection while the model is drafting
-- OAuth / Claude subscription auth (API key only)
+- In-process OAuth `/login` and automatic token refresh (today the CLI reuses Claude Code's stored credentials, but a stale token requires running `claude` to refresh)
+- Native macOS Keychain support for reading Claude Code's stored credentials (use `ANTHROPIC_AUTH_TOKEN` for now)
 
 These are next on the list — see the project ROADMAP if it grows.

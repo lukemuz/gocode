@@ -138,6 +138,169 @@ func TestProvider_Stream(t *testing.T) {
 	}
 }
 
+func TestNewProvider_AuthValidation(t *testing.T) {
+	if _, err := NewProvider(Config{}); err == nil {
+		t.Errorf("expected error when neither APIKey nor OAuthToken is set")
+	}
+	if _, err := NewProvider(Config{APIKey: "k", OAuthToken: "t"}); err == nil {
+		t.Errorf("expected error when both APIKey and OAuthToken are set")
+	}
+	if _, err := NewProvider(Config{APIKey: "k"}); err != nil {
+		t.Errorf("APIKey-only config should be valid: %v", err)
+	}
+	if _, err := NewProvider(Config{OAuthToken: "t"}); err != nil {
+		t.Errorf("OAuthToken-only config should be valid: %v", err)
+	}
+}
+
+func TestProvider_OAuthHeadersAndSystemPrompt(t *testing.T) {
+	type captured struct {
+		auth        string
+		apiKey      string
+		anthBeta    string
+		body        []byte
+	}
+	var got captured
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.auth = r.Header.Get("Authorization")
+		got.apiKey = r.Header.Get("X-Api-Key")
+		got.anthBeta = r.Header.Get("Anthropic-Beta")
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		got.body = buf
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"msg_1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	p := &Provider{cfg: Config{
+		OAuthToken: "sk-ant-oat-test",
+		BaseURL:    srv.URL,
+		HTTPClient: srv.Client(),
+	}}
+
+	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+		Model:    gocode.ModelSonnet,
+		System:   "You are gocode.",
+		Messages: []gocode.Message{gocode.NewUserMessage("ping")},
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	if got.auth != "Bearer sk-ant-oat-test" {
+		t.Errorf("Authorization header = %q, want Bearer sk-ant-oat-test", got.auth)
+	}
+	if got.apiKey != "" {
+		t.Errorf("X-Api-Key header should be empty when using OAuth, got %q", got.apiKey)
+	}
+	if got.anthBeta != oauthBetaHeader {
+		t.Errorf("Anthropic-Beta header = %q, want %q", got.anthBeta, oauthBetaHeader)
+	}
+
+	// System must serialize as an array whose first block carries the
+	// Claude Code identity, with the caller's prompt as a second block.
+	var body struct {
+		System []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"system"`
+	}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v\n%s", err, got.body)
+	}
+	if len(body.System) != 2 {
+		t.Fatalf("expected 2 system blocks, got %d: %+v", len(body.System), body.System)
+	}
+	if body.System[0].Text != claudeCodeIdentityPrompt {
+		t.Errorf("system[0] = %q, want %q", body.System[0].Text, claudeCodeIdentityPrompt)
+	}
+	if body.System[1].Text != "You are gocode." {
+		t.Errorf("system[1] = %q, want %q", body.System[1].Text, "You are gocode.")
+	}
+}
+
+func TestProvider_APIKeyHeaders(t *testing.T) {
+	var auth, apiKey, anthBeta string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		apiKey = r.Header.Get("X-Api-Key")
+		anthBeta = r.Header.Get("Anthropic-Beta")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"msg_1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	p := &Provider{cfg: Config{APIKey: "test-key", BaseURL: srv.URL, HTTPClient: srv.Client()}}
+	if _, err := p.Call(context.Background(), gocode.ProviderRequest{
+		Model:    gocode.ModelSonnet,
+		System:   "hi",
+		Messages: []gocode.Message{gocode.NewUserMessage("ping")},
+	}); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if apiKey != "test-key" {
+		t.Errorf("X-Api-Key header = %q, want test-key", apiKey)
+	}
+	if auth != "" {
+		t.Errorf("Authorization header should be empty when using API key, got %q", auth)
+	}
+	if anthBeta != "" {
+		t.Errorf("Anthropic-Beta header should be empty when using API key, got %q", anthBeta)
+	}
+}
+
+func TestAnthropicSystem_OAuthShape(t *testing.T) {
+	// OAuth + non-empty caller prompt: identity block + caller block,
+	// cache breakpoint attached to the caller block.
+	cache := &gocode.CacheControl{Type: "ephemeral"}
+	out := anthropicSystem("You are gocode.", cache, true)
+	blocks, ok := out.([]anthropicSystemBlock)
+	if !ok {
+		t.Fatalf("expected []anthropicSystemBlock, got %T", out)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(blocks))
+	}
+	if blocks[0].Text != claudeCodeIdentityPrompt || blocks[0].CacheControl != nil {
+		t.Errorf("identity block = %+v", blocks[0])
+	}
+	if blocks[1].Text != "You are gocode." || blocks[1].CacheControl != cache {
+		t.Errorf("caller block = %+v", blocks[1])
+	}
+
+	// OAuth + empty caller prompt: only the identity block; cache
+	// breakpoint attaches to it so an empty-system OAuth request is still
+	// a valid cache anchor.
+	out = anthropicSystem("", cache, true)
+	blocks, _ = out.([]anthropicSystemBlock)
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	if blocks[0].Text != claudeCodeIdentityPrompt || blocks[0].CacheControl != cache {
+		t.Errorf("oauth-empty block = %+v", blocks[0])
+	}
+
+	// Non-OAuth + empty caller: nil (omitted on the wire).
+	if got := anthropicSystem("", nil, false); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+
+	// Non-OAuth + cache: single block (existing behaviour).
+	out = anthropicSystem("hi", cache, false)
+	blocks, ok = out.([]anthropicSystemBlock)
+	if !ok || len(blocks) != 1 || blocks[0].Text != "hi" {
+		t.Errorf("non-oauth+cache shape = %+v", out)
+	}
+
+	// Non-OAuth + no cache: plain string (existing behaviour).
+	if got := anthropicSystem("hi", nil, false); got != "hi" {
+		t.Errorf("non-oauth+no-cache = %v, want \"hi\"", got)
+	}
+}
+
 func TestProvider_ErrorHandling(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
