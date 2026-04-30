@@ -439,6 +439,7 @@ Larger runnable patterns in `examples/recipes/`:
 - `04-router-subagents` — orchestrator delegates to specialist subagents
 - `05-persistent-chat` — long-running conversation with `FileStore`
 - `06-parallel-pipeline` — parallel fan-out then sequential fan-in
+- `07-web-service` — deploy-shaped HTTP server (JSON + SSE) with a Dockerfile
 
 Set the relevant API key first.
 
