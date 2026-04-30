@@ -11,9 +11,9 @@
 // Four commands are supported:
 //
 //   - view:        read a file (with optional [start,end] line range and
-//                  max_characters cap) or list a directory's entries
+//     max_characters cap) or list a directory's entries
 //   - str_replace: in-place exact-string replacement; rejects when old_str
-//                  is missing or non-unique
+//     is missing or non-unique
 //   - create:      write a new file (refuses to overwrite existing files)
 //   - insert:      insert new_str after a given line (0 = beginning)
 //
@@ -53,9 +53,9 @@ type Config struct {
 
 // Editor implements the str_replace_based_edit_tool commands.
 type Editor struct {
-	root          string
-	maxChars      int
-	maxFileBytes  int64
+	root         string
+	maxChars     int
+	maxFileBytes int64
 }
 
 // New constructs an Editor.

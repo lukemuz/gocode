@@ -10,13 +10,13 @@ import (
 // loadProjectMemory assembles the project-memory block that is appended to
 // the agent's system prompt. It looks for, in order:
 //
-//   1. <workspace>/AGENTS.md           (vendor-neutral convention; used by
-//                                       Codex, Cursor, Aider, etc.)
-//   2. <workspace>/CLAUDE.md           (Claude Code's flavour — read for
-//                                       compatibility with existing repos)
-//   3. ~/.config/gocode/AGENTS.md      (user-level, gocode-specific)
-//   4. ~/.claude/CLAUDE.md             (user-level, picked up so Claude
-//                                       Code users can share their memory)
+//  1. <workspace>/AGENTS.md           (vendor-neutral convention; used by
+//     Codex, Cursor, Aider, etc.)
+//  2. <workspace>/CLAUDE.md           (Claude Code's flavour — read for
+//     compatibility with existing repos)
+//  3. ~/.config/gocode/AGENTS.md      (user-level, gocode-specific)
+//  4. ~/.claude/CLAUDE.md             (user-level, picked up so Claude
+//     Code users can share their memory)
 //
 // Files that don't exist are skipped silently. The combined result is
 // rendered with clearly delimited section headers so the model can tell

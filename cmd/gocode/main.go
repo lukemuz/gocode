@@ -235,8 +235,9 @@ func main() {
 		gocode.Tools(subagentBindings...),
 	).CacheLast(gocode.Ephemeral()) // cache the entire tool block — stable per session
 
+	memory := loadProjectMemory(*dir)
 	system := mainSystemPrompt
-	if memory := loadProjectMemory(*dir); memory != "" {
+	if memory != "" {
 		system += "\n\n## Project memory\n\n" + memory
 	}
 
@@ -252,6 +253,10 @@ func main() {
 		MaxIter: *maxIter,
 	}
 
+	// Summarizer for /compact runs on Haiku — cheap and plenty capable
+	// for transcript summarization. Independent of the user's main model.
+	summarizer := mainClient.WithModel(gocode.ModelHaiku)
+
 	// --- run ---------------------------------------------------------------
 
 	abs, _ := absDir(*dir)
@@ -263,9 +268,15 @@ func main() {
 	if !*noSubagents {
 		fmt.Fprintf(os.Stderr, "        explore=%s  plan=%s\n", *exploreModel, *planModel)
 	}
-	fmt.Fprintln(os.Stderr, "type a request, or :help for commands. ctrl-c to interrupt, ctrl-d to exit.")
+	fmt.Fprintln(os.Stderr, "type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.")
 
-	repl(ctx, agent)
+	s := &session{
+		agent:      agent,
+		summarizer: summarizer,
+		provider:   provider,
+		memory:     memory,
+	}
+	s.repl(ctx)
 }
 
 func mustClient(provider gocode.Provider, model string) *gocode.Client {
@@ -284,77 +295,6 @@ func mustClient(provider gocode.Provider, model string) *gocode.Client {
 		log.Fatal(err)
 	}
 	return c
-}
-
-func repl(ctx context.Context, agent gocode.Agent) {
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	var history []gocode.Message
-	var totalIn, totalOut int
-
-	for {
-		fmt.Fprint(os.Stderr, "\n> ")
-		if !scanner.Scan() {
-			fmt.Fprintln(os.Stderr)
-			return
-		}
-		input := strings.TrimSpace(scanner.Text())
-		if input == "" {
-			continue
-		}
-
-		switch input {
-		case ":exit", ":quit":
-			return
-		case ":help":
-			fmt.Fprintln(os.Stderr, ":exit | :quit       leave")
-			fmt.Fprintln(os.Stderr, ":reset              clear conversation history")
-			fmt.Fprintln(os.Stderr, ":tokens             print accumulated token usage")
-			continue
-		case ":reset":
-			history = nil
-			fmt.Fprintln(os.Stderr, "(history cleared)")
-			continue
-		case ":tokens":
-			fmt.Fprintf(os.Stderr, "tokens: %d in, %d out\n", totalIn, totalOut)
-			continue
-		}
-
-		history = append(history, gocode.NewUserMessage(input))
-
-		turnCtx, cancel := signal.NotifyContext(ctx, syscall.SIGINT)
-		result, err := agent.StepStream(turnCtx, history,
-			func(b gocode.ContentBlock) {
-				if b.Type == gocode.TypeText {
-					fmt.Print(b.Text)
-				}
-			},
-			func(results []gocode.ToolResult) {
-				for _, r := range results {
-					status := "ok"
-					if r.IsError {
-						status = "error"
-					}
-					fmt.Fprintf(os.Stderr, "\n[tool %s: %d bytes]\n", status, len(r.Content))
-				}
-			},
-		)
-		cancel()
-		fmt.Println()
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			if n := len(history); n > 0 {
-				history = history[:n-1]
-			}
-			continue
-		}
-
-		history = result.Messages
-		totalIn += result.Usage.InputTokens
-		totalOut += result.Usage.OutputTokens
-	}
 }
 
 func makeConfirmer(autoYes bool) func(ctx context.Context, b gocode.ToolBinding, input json.RawMessage) (bool, error) {
