@@ -26,6 +26,7 @@ package bash
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -165,6 +166,29 @@ func New(cfg Config) (*Tool, error) {
 // Toolset returns a single-binding toolset suitable for gocode.Join.
 func (t *Tool) Toolset() gocode.Toolset {
 	return gocode.Tools(t.binding)
+}
+
+// TrainedHandler returns a ToolFunc with the input shape Anthropic's
+// bash_20250124 trained tool emits ({"command": "...", "restart": bool}).
+// Pair with anthropic.BashTool to register a binding the model has been
+// post-trained on. The "restart" flag is acknowledged but a no-op — we
+// don't maintain a persistent shell session, so each invocation is fresh.
+func (t *Tool) TrainedHandler() gocode.ToolFunc {
+	return func(ctx context.Context, raw json.RawMessage) (string, error) {
+		var in struct {
+			Command string `json:"command"`
+			Restart bool   `json:"restart,omitempty"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &in); err != nil {
+				return "", fmt.Errorf("bash: parse trained input: %w", err)
+			}
+		}
+		if in.Restart {
+			return "(restart acknowledged; this handler runs each command in a fresh shell)", nil
+		}
+		return t.run(ctx, bashInput{Command: in.Command})
+	}
 }
 
 type bashInput struct {

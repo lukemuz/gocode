@@ -124,6 +124,10 @@ func BashTool(fn gocode.ToolFunc) gocode.ToolBinding {
 // tool. The wire declaration is {"type": "text_editor_20250124", "name":
 // "str_replace_editor"}; the model emits "command" actions (view, create,
 // str_replace, insert, undo_edit) the handler must implement.
+//
+// This is the legacy variant. For Claude 4.x prefer TextEditor20250728,
+// which uses the newer name "str_replace_based_edit_tool", drops the
+// undo_edit command, and adds the max_characters parameter on view.
 func TextEditorTool(fn gocode.ToolFunc) gocode.ToolBinding {
 	body := map[string]any{
 		"type": "text_editor_20250124",
@@ -140,6 +144,39 @@ func TextEditorTool(fn gocode.ToolFunc) gocode.ToolBinding {
 		Meta: gocode.ToolMetadata{
 			Source:     "anthropic.text_editor_20250124",
 			Filesystem: true,
+		},
+	}
+}
+
+// TextEditor20250728 wraps a handler as Anthropic's latest text editor
+// tool. The wire declaration is {"type": "text_editor_20250728", "name":
+// "str_replace_based_edit_tool"}, supported on Claude 4.x. The model
+// emits four commands the handler must implement:
+//
+//   - view:        {path, view_range?: [start, end], max_characters?: int}
+//   - str_replace: {path, old_str, new_str}
+//   - create:      {path, file_text}
+//   - insert:      {path, insert_line, new_str}
+//
+// undo_edit was removed in this version. max_characters (added 2025-07-28)
+// caps how much of a viewed file is returned.
+func TextEditor20250728(fn gocode.ToolFunc) gocode.ToolBinding {
+	body := map[string]any{
+		"type": "text_editor_20250728",
+		"name": "str_replace_based_edit_tool",
+	}
+	tool := gocode.Tool{
+		Name:     "str_replace_based_edit_tool",
+		Provider: ProviderTag,
+		Raw:      mustMarshal(body),
+	}
+	return gocode.ToolBinding{
+		Tool: tool,
+		Func: fn,
+		Meta: gocode.ToolMetadata{
+			Source:               "anthropic.text_editor_20250728",
+			Filesystem:           true,
+			RequiresConfirmation: true,
 		},
 	}
 }

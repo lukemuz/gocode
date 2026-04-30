@@ -43,6 +43,7 @@ import (
 	"github.com/lukemuz/gocode/providers/anthropic"
 	"github.com/lukemuz/gocode/tools/bash"
 	"github.com/lukemuz/gocode/tools/clock"
+	"github.com/lukemuz/gocode/tools/editor"
 	"github.com/lukemuz/gocode/tools/todo"
 	"github.com/lukemuz/gocode/tools/workspace"
 )
@@ -51,8 +52,8 @@ const systemPrompt = `You are gocode, a fast and economical CLI coding assistant
 
 You operate inside a workspace directory. Available tools:
 - list_directory, find_files, search_text, read_file, file_info: read-only filesystem inspection
-- edit_file: in-place text replacement (requires user confirmation)
-- bash: run shell commands (safety policy varies by configuration)
+- str_replace_based_edit_tool: view/create/str_replace/insert against files (Anthropic's trained editor)
+- bash: run shell commands (Anthropic's trained bash; safety policy varies by configuration)
 - todo_write, todo_read: maintain a short planning checklist for multi-step work
 - now: current time
 
@@ -99,7 +100,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ws, err := workspace.New(workspace.Config{Root: *dir})
+	ws, err := workspace.NewReadOnly(workspace.Config{Root: *dir})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -107,7 +108,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	ed, err := editor.New(editor.Config{Root: *dir})
+	if err != nil {
+		log.Fatal(err)
+	}
 	todos := todo.New()
+
+	// Use Anthropic's trained tool definitions for bash and the text
+	// editor. The model has been post-trained on these names and input
+	// shapes, so they outperform our hand-written equivalents on the
+	// Anthropic API. Our local handlers still enforce sandboxing,
+	// timeouts, and the bash safety policy.
+	bashBinding := anthropic.BashTool(bashTool.TrainedHandler())
+	bashBinding.Meta.RequiresConfirmation = bashTool.Toolset().Bindings[0].Meta.RequiresConfirmation
+	editorBinding := anthropic.TextEditor20250728(ed.Handler())
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	confirm := makeConfirmer(*autoYes)
@@ -115,7 +129,7 @@ func main() {
 	tools := gocode.MustJoin(
 		clock.New().Toolset(),
 		ws.Toolset(),
-		bashTool.Toolset(),
+		gocode.Tools(bashBinding, editorBinding),
 		todos.Toolset(),
 	).Wrap(
 		gocode.WithConfirmation(confirm),
