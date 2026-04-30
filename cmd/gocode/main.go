@@ -21,12 +21,12 @@
 //
 // Usage:
 //
-//	# Pay-as-you-go API:
-//	export ANTHROPIC_API_KEY=sk-ant-...
-//	# Or a Claude Pro/Max subscription OAuth token:
+//	# Run Claude Code's /login once on Linux/Windows; the CLI reuses
+//	# ~/.claude/.credentials.json automatically.
+//	# Or set a subscription OAuth token explicitly (e.g. on macOS):
 //	export ANTHROPIC_AUTH_TOKEN=sk-ant-oat...
-//	# Or just run Claude Code's /login once on Linux/Windows; the
-//	# CLI reuses ~/.claude/.credentials.json automatically.
+//	# Or fall back to pay-as-you-go API billing:
+//	export ANTHROPIC_API_KEY=sk-ant-...
 //	go run ./cmd/gocode -dir . -bash standard
 //
 // Flags:
@@ -353,24 +353,22 @@ func resolveLogPath(spec string) (string, error) {
 }
 
 // resolveAnthropicProvider builds an anthropic.Provider, picking
-// credentials from (in order): ANTHROPIC_API_KEY (pay-as-you-go API),
-// ANTHROPIC_AUTH_TOKEN (OAuth bearer token, e.g. for macOS users who
-// can't read the credentials file), and ~/.claude/.credentials.json
-// (the OAuth credentials Claude Code's /login writes on Linux/Windows).
+// credentials from (in order): ANTHROPIC_AUTH_TOKEN (OAuth bearer
+// token, e.g. for macOS users who can't read the credentials file),
+// ~/.claude/.credentials.json (the OAuth credentials Claude Code's
+// /login writes on Linux/Windows), and finally ANTHROPIC_API_KEY
+// (pay-as-you-go API). Subscription auth wins over API auth so users
+// who have both set don't accidentally bill the API.
 //
 // Returns the provider plus a short human-readable label describing
 // which source was used, for the startup banner.
 func resolveAnthropicProvider() (*anthropic.Provider, string, error) {
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		p, err := anthropic.NewProvider(anthropic.Config{APIKey: key})
-		return p, "ANTHROPIC_API_KEY (api)", err
-	}
 	if tok := os.Getenv("ANTHROPIC_AUTH_TOKEN"); tok != "" {
 		p, err := anthropic.NewProvider(anthropic.Config{OAuthToken: tok})
 		return p, "ANTHROPIC_AUTH_TOKEN (subscription)", err
 	}
-	creds, err := anthropic.LoadClaudeCredentials()
-	if err == nil {
+	creds, credsErr := anthropic.LoadClaudeCredentials()
+	if credsErr == nil {
 		if creds.Expired() {
 			return nil, "", fmt.Errorf("Claude Code OAuth token at ~/.claude/.credentials.json expired at %s — re-run `claude` (the Claude Code CLI) to refresh, or unset and use ANTHROPIC_API_KEY",
 				creds.ExpiresAt.Format(time.RFC3339))
@@ -382,10 +380,14 @@ func resolveAnthropicProvider() (*anthropic.Provider, string, error) {
 		}
 		return p, label, err
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, "", fmt.Errorf("read ~/.claude/.credentials.json: %w", err)
+	if !errors.Is(credsErr, os.ErrNotExist) {
+		return nil, "", fmt.Errorf("read ~/.claude/.credentials.json: %w", credsErr)
 	}
-	return nil, "", errors.New("no Anthropic credentials found. Set ANTHROPIC_API_KEY (pay-as-you-go), ANTHROPIC_AUTH_TOKEN (subscription OAuth token), or run Claude Code's /login to populate ~/.claude/.credentials.json")
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		p, err := anthropic.NewProvider(anthropic.Config{APIKey: key})
+		return p, "ANTHROPIC_API_KEY (api)", err
+	}
+	return nil, "", errors.New("no Anthropic credentials found. Set ANTHROPIC_AUTH_TOKEN (subscription OAuth token), run Claude Code's /login to populate ~/.claude/.credentials.json, or set ANTHROPIC_API_KEY (pay-as-you-go)")
 }
 
 func mustClient(provider gocode.Provider, model string) *gocode.Client {

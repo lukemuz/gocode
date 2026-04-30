@@ -6,23 +6,23 @@ A fast, economical CLI coding agent built on the gocode toolkit. Inspired by Cla
 
 ## Install / run
 
-You need Anthropic credentials in your environment. The CLI tries three sources, in order:
+You need Anthropic credentials in your environment. The CLI tries three sources, in this order — **subscription auth wins over API billing** so users who have both set don't accidentally rack up an API bill:
 
-1. **`ANTHROPIC_API_KEY`** — pay-as-you-go API access. The well-trodden path.
-2. **`ANTHROPIC_AUTH_TOKEN`** — a Claude subscription OAuth access token, set explicitly. Useful on macOS, where Claude Code stores its credentials in the Keychain rather than on disk.
-3. **`~/.claude/.credentials.json`** — the OAuth credentials Claude Code's `/login` writes on Linux/Windows. If that file exists and the token isn't expired, gocode reuses it automatically — no extra config.
+1. **`ANTHROPIC_AUTH_TOKEN`** — a Claude subscription OAuth access token, set explicitly. Useful on macOS, where Claude Code stores its credentials in the Keychain rather than on disk.
+2. **`~/.claude/.credentials.json`** — the OAuth credentials Claude Code's `/login` writes on Linux/Windows. If that file exists and the token isn't expired, gocode reuses it automatically — no extra config.
+3. **`ANTHROPIC_API_KEY`** — pay-as-you-go API access. Used only when neither subscription source is available.
 
 Pick whichever fits:
 
 ```bash
-# Option 1: API billing
-export ANTHROPIC_API_KEY=sk-ant-...
+# Option 1: subscription via Claude Code's stored credentials (Linux/Windows)
+#   Run Claude Code's /login once; gocode picks the token up automatically.
 
-# Option 2: explicit subscription token
+# Option 2: explicit subscription token (e.g. on macOS)
 export ANTHROPIC_AUTH_TOKEN=sk-ant-oat...
 
-# Option 3: subscription via Claude Code's stored credentials (Linux/Windows)
-#   Run Claude Code's /login once; gocode picks the token up automatically.
+# Option 3: API billing
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### Using your Claude subscription (Pro / Max)
@@ -37,7 +37,7 @@ Caveats worth knowing:
 - **Token refresh isn't implemented yet.** Subscription tokens expire (typically every few hours). When that happens gocode prints the expiry timestamp and asks you to re-run Claude Code's `/login` to refresh; you'll then need to start a new gocode session. Refresh-on-demand is on the list.
 - **Subscriptions have rate limits.** Heavy parallel use (subagents fanning out greps, long sessions, big context windows) can trip your subscription's fair-use limits faster than you'd expect. If you hit them, fall back to `ANTHROPIC_API_KEY` for the session.
 - **System prompt is partially fixed.** The Anthropic OAuth scope only authorises traffic identifying as Claude Code, so gocode prepends a short `"You are Claude Code, Anthropic's official CLI for Claude."` block ahead of its own system prompt. The prepended block is stable per session and cached, so the cost is one-time.
-- **API key wins ties.** If `ANTHROPIC_API_KEY` is set, gocode uses it — even if subscription credentials are also available. Unset it to force the subscription path.
+- **Subscription wins ties.** If a subscription token is available (`ANTHROPIC_AUTH_TOKEN` or `~/.claude/.credentials.json`), gocode uses it — even when `ANTHROPIC_API_KEY` is also set. Unset the subscription source to force the API-billing path.
 
 ### Option A — install once, run anywhere (recommended)
 
@@ -95,7 +95,7 @@ gocode -dir . -log auto
 You should see:
 ```
 gocode (beta) — experimental CLI built on the gocode toolkit
-  auth=ANTHROPIC_API_KEY (api)  model=claude-sonnet-4-6  bash=restricted  subagents=on  dir=/abs/path
+  auth=Claude Code subscription (max)  model=claude-sonnet-4-6  bash=restricted  subagents=on  dir=/abs/path
   explore=claude-haiku-4-5-20251001  plan=claude-opus-4-7
   log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
 type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
