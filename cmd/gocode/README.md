@@ -83,6 +83,7 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |
 | `-yes` | false | Auto-approve every confirmation prompt |
 | `-max-iter` | 30 | Max model calls per user turn |
+| `-log` | (off) | JSONL session log path. Use `-log auto` to write under `~/.config/gocode/sessions/<timestamp>.jsonl`, or pass an explicit path. |
 
 ### Bash safety modes
 
@@ -106,6 +107,13 @@ Both `/cmd` and `:cmd` are accepted.
 | `/memory` | Print the loaded project memory |
 | `/tools` | List available tools (with `[confirm]` flag) |
 | `/model <id>` | Switch the main-agent model mid-session (subagent models unchanged) |
+| `/log` | Print the active JSONL log path (if any) |
+
+## Session logging
+
+`-log auto` (or `-log <path>`) writes a JSON Lines trace of the entire session to disk. Every model request, response, retry, tool call (start and end with input + output), and turn boundary is recorded — for the main agent and both subagents. The file is append-only, safe to read while the session is running.
+
+It's the right thing to enable when something feels off and we want to look at what actually happened together. `jq -c '.type' session.jsonl | sort | uniq -c` is a good first pass; pipe specific events to `jq -c 'select(.type == "tool_call_end") | {tool: .tool_name, bytes: (.tool_output | length), error: .is_error}'` for tool-level inspection.
 
 ## Recipes
 

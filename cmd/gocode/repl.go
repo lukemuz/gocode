@@ -23,6 +23,7 @@ type session struct {
 
 	history []gocode.Message
 	usage   gocode.Usage // accumulated across the session
+	logPath string       // empty if no JSONL log is active
 }
 
 func (s *session) repl(ctx context.Context) {
@@ -119,6 +120,12 @@ func (s *session) runCommand(ctx context.Context, line string) bool {
 		s.printTools()
 	case "model":
 		s.changeModel(args)
+	case "log":
+		if s.logPath == "" {
+			fmt.Fprintln(os.Stderr, "(session logging is off — start with -log auto or -log <path>)")
+		} else {
+			fmt.Fprintln(os.Stderr, s.logPath)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: /%s (try /help)\n", cmd)
 	}
@@ -135,6 +142,7 @@ func (s *session) printHelp() {
 		"/memory                  print the loaded project memory (AGENTS.md / CLAUDE.md)",
 		"/tools                   list the tools currently available to the agent",
 		"/model <id>              switch the main-agent model (e.g. claude-opus-4-7)",
+		"/log                     print the active JSONL log path (if any)",
 	} {
 		fmt.Fprintln(os.Stderr, line)
 	}

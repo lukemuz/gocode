@@ -51,6 +51,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -120,6 +121,7 @@ func main() {
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
 	autoYes := flag.Bool("yes", false, "auto-approve every confirmation prompt")
 	maxIter := flag.Int("max-iter", 30, "max model calls per turn")
+	logPath := flag.String("log", "", "JSONL session log path. Pass `auto` to write under ~/.config/gocode/sessions/")
 	flag.Parse()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -136,6 +138,32 @@ func main() {
 	}
 
 	mainClient := mustClient(provider, *model)
+
+	// Optional JSONL session log. The recorder is attached to mainClient
+	// before any WithModel-derived clients (summarizer, explore, plan) are
+	// created — WithModel preserves the recorder, so all loops in the
+	// session log to the same file.
+	var logFile *os.File
+	resolvedLog := ""
+	if *logPath != "" {
+		path, err := resolveLogPath(*logPath)
+		if err != nil {
+			log.Fatalf("log path: %v", err)
+		}
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			log.Fatalf("open log: %v", err)
+		}
+		logFile = f
+		resolvedLog = path
+		mainClient = mainClient.WithRecorder(gocode.NewJSONLRecorder(f))
+	}
+	defer func() {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
+	}()
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	confirm := makeConfirmer(*autoYes)
 
@@ -281,6 +309,9 @@ func main() {
 	if !*noSubagents {
 		fmt.Fprintf(os.Stderr, "        explore=%s  plan=%s\n", *exploreModel, *planModel)
 	}
+	if resolvedLog != "" {
+		fmt.Fprintf(os.Stderr, "        log=%s\n", resolvedLog)
+	}
 	fmt.Fprintln(os.Stderr, "type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.")
 
 	s := &session{
@@ -288,8 +319,28 @@ func main() {
 		summarizer: summarizer,
 		provider:   provider,
 		memory:     memory,
+		logPath:    resolvedLog,
 	}
 	s.repl(ctx)
+}
+
+// resolveLogPath turns a user-supplied -log value into an absolute path.
+// "auto" expands to ~/.config/gocode/sessions/<timestamp>.jsonl, creating
+// the directory if needed. Any other value is treated as a literal path.
+func resolveLogPath(spec string) (string, error) {
+	if spec != "auto" {
+		return filepath.Abs(spec)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".config", "gocode", "sessions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	stamp := time.Now().Format("2006-01-02T15-04-05")
+	return filepath.Join(dir, stamp+".jsonl"), nil
 }
 
 func mustClient(provider gocode.Provider, model string) *gocode.Client {
