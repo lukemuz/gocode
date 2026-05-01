@@ -12,7 +12,10 @@ export OPENROUTER_API_KEY=sk-or-...
 
 Models default to Anthropic's Claude routes on OpenRouter, but `-model`,
 `-explore-model`, and `-plan-model` accept any OpenRouter slug
-(e.g. `openai/gpt-5`, `google/gemini-2.5-pro`).
+(e.g. `openai/gpt-5`, `google/gemini-2.5-pro`). Each flag has a matching
+env var (`GOCODE_MODEL`, `GOCODE_EXPLORE_MODEL`, `GOCODE_PLAN_MODEL`,
+plus `GOCODE_SUMMARIZE_MODEL` for the `/compact` summarizer) so you can
+pin tiers in your shell rc or a per-project `.envrc`.
 
 ### Option A — install once, run anywhere (recommended)
 
@@ -136,9 +139,9 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | Flag | Default | Description |
 |---|---|---|
 | `-dir` | `.` | Working directory the agent is sandboxed to |
-| `-model` | `anthropic/claude-sonnet-4.6` | Main-agent model (any OpenRouter slug) |
-| `-explore-model` | `anthropic/claude-haiku-4.5` | Model for the explore subagent |
-| `-plan-model` | `anthropic/claude-opus-4.7` | Model for the plan subagent |
+| `-model` | `anthropic/claude-sonnet-4.6` | Main-agent model (any OpenRouter slug; env: `GOCODE_MODEL`) |
+| `-explore-model` | `anthropic/claude-haiku-4.5` | Model for the explore subagent (env: `GOCODE_EXPLORE_MODEL`) |
+| `-plan-model` | `anthropic/claude-opus-4.7` | Model for the plan subagent (env: `GOCODE_PLAN_MODEL`) |
 | `-no-subagents` | false | Disable the explore and plan tools |
 | `-no-fetch` | false | Disable the native `web_fetch` tool |
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |

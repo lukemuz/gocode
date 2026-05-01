@@ -119,9 +119,9 @@ Operating principles:
 
 func main() {
 	dir := flag.String("dir", ".", "working directory the agent is sandboxed to")
-	model := flag.String("model", "anthropic/claude-sonnet-4.6", "main-agent model id (any OpenRouter slug)")
-	exploreModel := flag.String("explore-model", "anthropic/claude-haiku-4.5", "model id for the explore subagent")
-	planModel := flag.String("plan-model", "anthropic/claude-opus-4.7", "model id for the plan subagent")
+	model := flag.String("model", envOr("GOCODE_MODEL", "anthropic/claude-sonnet-4.6"), "main-agent model id (any OpenRouter slug; env: GOCODE_MODEL)")
+	exploreModel := flag.String("explore-model", envOr("GOCODE_EXPLORE_MODEL", "anthropic/claude-haiku-4.5"), "model id for the explore subagent (env: GOCODE_EXPLORE_MODEL)")
+	planModel := flag.String("plan-model", envOr("GOCODE_PLAN_MODEL", "anthropic/claude-opus-4.7"), "model id for the plan subagent (env: GOCODE_PLAN_MODEL)")
 	noSubagents := flag.Bool("no-subagents", false, "disable explore and plan subagent tools")
 	noFetch := flag.Bool("no-fetch", false, "disable the native web_fetch tool")
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
@@ -300,7 +300,7 @@ func main() {
 
 	// Summarizer for /compact runs on Haiku — cheap and plenty capable
 	// for transcript summarization. Independent of the user's main model.
-	summarizer := mainClient.WithModel("anthropic/claude-haiku-4.5")
+	summarizer := mainClient.WithModel(envOr("GOCODE_SUMMARIZE_MODEL", "anthropic/claude-haiku-4.5"))
 
 	// --- run ---------------------------------------------------------------
 
@@ -402,6 +402,15 @@ func compactJSON(raw json.RawMessage) string {
 		s = s[:400] + "..."
 	}
 	return s
+}
+
+// envOr returns the value of env var name, or fallback if the variable
+// is unset or empty. Used to give CLI flags env-var defaults.
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func parseBashMode(s string) (bash.Mode, error) {
