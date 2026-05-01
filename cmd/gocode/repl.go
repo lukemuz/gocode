@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/lukemuz/gocode"
 )
@@ -64,8 +66,50 @@ func (s *session) runTurn(ctx context.Context, input string) {
 	toolNames := map[string]string{}
 	toolInputs := map[string]json.RawMessage{}
 
+	// Spinner with two-mode label:
+	//   - "thinking…"     between turns / iterations (model latency)
+	//   - "running tools…" when deltas pause for >500ms within a turn
+	//                      (proxy signal that tool execution is in flight)
+	sp := newSpinner(os.Stderr)
+	defer sp.Stop()
+
+	var idleMu sync.Mutex
+	var idleTimer *time.Timer
+	armIdle := func() {
+		idleMu.Lock()
+		defer idleMu.Unlock()
+		if idleTimer != nil {
+			idleTimer.Stop()
+		}
+		idleTimer = time.AfterFunc(500*time.Millisecond, func() {
+			sp.Start("running tools…")
+		})
+	}
+	disarmIdle := func() {
+		idleMu.Lock()
+		defer idleMu.Unlock()
+		if idleTimer != nil {
+			idleTimer.Stop()
+			idleTimer = nil
+		}
+	}
+
+	// Start the spinner immediately — first model latency is the most
+	// common "is it doing anything?" moment.
+	sp.Start("thinking…")
+	// And restart it before each subsequent iteration's model call.
+	s.agent.Hooks.OnIteration = func(ctx context.Context, iter int, history []gocode.Message) {
+		if iter == 0 {
+			return // already started above
+		}
+		sp.Start("thinking…")
+	}
+	defer func() { s.agent.Hooks.OnIteration = nil }()
+
 	result, err := s.agent.StepStream(turnCtx, s.history,
 		func(b gocode.ContentBlock) {
+			sp.Stop()
+			armIdle()
 			switch b.Type {
 			case gocode.TypeText:
 				fmt.Print(b.Text)
@@ -82,6 +126,8 @@ func (s *session) runTurn(ctx context.Context, input string) {
 			}
 		},
 		func(results []gocode.ToolResult) {
+			disarmIdle()
+			sp.Stop()
 			fmt.Fprintln(os.Stderr)
 			for _, r := range results {
 				name := toolNames[r.ToolUseID]
@@ -93,6 +139,8 @@ func (s *session) runTurn(ctx context.Context, input string) {
 			}
 		},
 	)
+	disarmIdle()
+	sp.Stop()
 	fmt.Println()
 
 	if err != nil {
@@ -181,8 +229,10 @@ func (s *session) doCompact(ctx context.Context, instructions string) {
 		return
 	}
 	before := len(s.history)
-	fmt.Fprintln(os.Stderr, dim("compacting…"))
+	sp := newSpinner(os.Stderr)
+	sp.Start("compacting…")
 	out, usage, err := compact(ctx, s.summarizer, s.history, 4, instructions)
+	sp.Stop()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, red("✗ compact failed: ")+err.Error())
 		return

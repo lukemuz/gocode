@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 // ANSI escape sequences. We deliberately keep this tiny and self-contained
@@ -102,4 +105,88 @@ func oneLine(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return strings.TrimSpace(s)
+}
+
+// spinner is a tiny activity indicator. It's safe to Start, Stop, and Set
+// from any goroutine. Start is idempotent: a second Start while running
+// just updates the label. Stop blocks until the render goroutine has
+// emitted the line-erase escape, so it's safe to print other content
+// immediately afterward without overlap.
+//
+// When useColor is false (non-TTY, NO_COLOR, or TERM=dumb) the spinner
+// is a no-op — no goroutine, no output.
+type spinner struct {
+	w io.Writer
+
+	mu      sync.Mutex
+	running bool
+	label   string
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+}
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func newSpinner(w io.Writer) *spinner {
+	return &spinner{w: w}
+}
+
+// Start begins (or updates) the spinner with the given label. Concurrent
+// calls are safe.
+func (s *spinner) Start(label string) {
+	if !useColor {
+		return
+	}
+	s.mu.Lock()
+	if s.running {
+		s.label = label
+		s.mu.Unlock()
+		return
+	}
+	s.running = true
+	s.label = label
+	s.stopCh = make(chan struct{})
+	s.doneCh = make(chan struct{})
+	s.mu.Unlock()
+	go s.run()
+}
+
+// Stop halts the spinner and erases its line. Returns once the render
+// goroutine has exited.
+func (s *spinner) Stop() {
+	if !useColor {
+		return
+	}
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+	s.running = false
+	close(s.stopCh)
+	doneCh := s.doneCh
+	s.mu.Unlock()
+	<-doneCh
+	// Carriage return + clear-to-end-of-line. Repaint owners write
+	// after this, and the line will be empty.
+	fmt.Fprint(s.w, "\r\x1b[K")
+}
+
+func (s *spinner) run() {
+	t := time.NewTicker(80 * time.Millisecond)
+	defer t.Stop()
+	i := 0
+	for {
+		select {
+		case <-s.stopCh:
+			close(s.doneCh)
+			return
+		case <-t.C:
+			s.mu.Lock()
+			label := s.label
+			s.mu.Unlock()
+			fmt.Fprintf(s.w, "\r\x1b[K%s %s", cyan(spinnerFrames[i%len(spinnerFrames)]), dim(label))
+			i++
+		}
+	}
 }

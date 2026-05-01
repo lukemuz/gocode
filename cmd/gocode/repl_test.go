@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestToolInputPreview(t *testing.T) {
@@ -63,6 +66,78 @@ func TestToolInputPreview(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSpinnerLifecycle(t *testing.T) {
+	// Force color on so the spinner actually runs (it's a no-op otherwise).
+	prev := useColor
+	useColor = true
+	defer func() { useColor = prev }()
+
+	var buf bytes.Buffer
+	var bufMu sync.Mutex
+	w := &lockedWriter{w: &buf, mu: &bufMu}
+
+	sp := newSpinner(w)
+	sp.Start("thinking…")
+	time.Sleep(180 * time.Millisecond) // ~2 ticks at 80ms
+	sp.Stop()
+
+	bufMu.Lock()
+	out := buf.String()
+	bufMu.Unlock()
+
+	if !strings.Contains(out, "thinking") {
+		t.Errorf("expected label in output, got %q", out)
+	}
+	if !strings.Contains(out, "\r") {
+		t.Errorf("expected carriage return in spinner output")
+	}
+	// Stop emits the clear-line escape.
+	if !strings.Contains(out, "\x1b[K") {
+		t.Errorf("expected clear-line escape after Stop")
+	}
+}
+
+func TestSpinnerStartIsIdempotent(t *testing.T) {
+	prev := useColor
+	useColor = true
+	defer func() { useColor = prev }()
+
+	sp := newSpinner(&bytes.Buffer{})
+	sp.Start("a")
+	sp.Start("b") // should just update label, not panic or leak goroutine
+	sp.Start("c")
+	sp.Stop()
+	sp.Stop() // double-stop is a no-op
+}
+
+func TestSpinnerNoOpWhenColorOff(t *testing.T) {
+	prev := useColor
+	useColor = false
+	defer func() { useColor = prev }()
+
+	var buf bytes.Buffer
+	sp := newSpinner(&buf)
+	sp.Start("nope")
+	time.Sleep(120 * time.Millisecond)
+	sp.Stop()
+	if buf.Len() != 0 {
+		t.Errorf("expected no output when color is off, got %q", buf.String())
+	}
+}
+
+// lockedWriter serialises writes so the test can read the buffer mid-flight
+// without racing the spinner goroutine.
+type lockedWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 func TestHumanBytes(t *testing.T) {
