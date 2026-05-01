@@ -36,7 +36,7 @@ Then from any directory you want the agent to work in:
 
 ```bash
 cd ~/your-project
-gocode -log auto
+gocode
 ```
 
 To re-install after pulling new commits, run `go install ...` again.
@@ -47,7 +47,7 @@ From the gocode checkout:
 
 ```bash
 go build -o bin/gocode ./cmd/gocode
-cd ~/your-project && /path/to/gocode/bin/gocode -log auto
+cd ~/your-project && /path/to/gocode/bin/gocode
 ```
 
 Or symlink it into your `PATH`:
@@ -70,7 +70,7 @@ Slow start every time (re-compiles), but no binary to manage. Pass `-dir` if you
 
 ```bash
 cd ~/your-project
-gocode -log auto
+gocode
 ```
 
 The agent operates on the current working directory by default. Pass `-dir <path>` to point it elsewhere without changing shells.
@@ -79,12 +79,13 @@ You should see:
 ```
 gocode  model=x-ai/grok-4.3  bash=restricted  subagents=on  dir=/abs/path
         explore=openai/gpt-oss-120b  plan=x-ai/grok-4.3
-        log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
 type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
 > 
 ```
 
 If you get `openrouter provider: OPENROUTER_API_KEY environment variable is not set`, you missed the `export` step.
+
+> Tip: pass `-log auto` if you want a JSON Lines trace of the session for debugging — see [Session logging](#session-logging) below. It's not needed for normal use.
 
 ## What's running
 
@@ -180,9 +181,13 @@ Both `/cmd` and `:cmd` are accepted.
 
 ## Session logging
 
+Session logging is **opt-in and intended for debugging** — leave it off for everyday use.
+
 `-log auto` (or `-log <path>`) writes a JSON Lines trace of the entire session to disk. Every model request, response, retry, tool call (start and end with input + output), and turn boundary is recorded — for the main agent and both subagents. The file is append-only, safe to read while the session is running.
 
-It's the right thing to enable when something feels off and we want to look at what actually happened together. `jq -c '.type' session.jsonl | sort | uniq -c` is a good first pass; pipe specific events to `jq -c 'select(.type == "tool_call_end") | {tool: .tool_name, bytes: (.tool_output | length), error: .is_error}'` for tool-level inspection.
+Enable it when something feels off and you want to look at what actually happened. `jq -c '.type' session.jsonl | sort | uniq -c` is a good first pass; pipe specific events to `jq -c 'select(.type == "tool_call_end") | {tool: .tool_name, bytes: (.tool_output | length), error: .is_error}'` for tool-level inspection.
+
+Note: session logs include full tool inputs and outputs, which means file contents the agent read end up on disk under `~/.config/gocode/sessions/`. Skip `-log` if you're working with anything sensitive, or pass an explicit `-log <path>` to a location you control.
 
 ## Recipes
 
