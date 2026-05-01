@@ -9,15 +9,20 @@ package workspace
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lukemuz/gocode"
@@ -26,7 +31,61 @@ import (
 const (
 	defaultMaxFileBytes = 1 << 20 // 1 MiB
 	defaultMaxResults   = 100
+
+	// binarySniffBytes is how many leading bytes we look at to detect a
+	// binary file (presence of a NUL byte). 8 KiB matches what most
+	// search tools use.
+	binarySniffBytes = 8192
 )
+
+// defaultSkipDirs is the set of directory basenames that Glob and Grep
+// skip during traversal by default. These are conventional bloat
+// directories — version-control metadata, dependency vendors, build
+// outputs, language-specific caches — that almost always waste tool
+// budget without producing useful results in a coding context.
+//
+// Walks rooted directly at one of these directories are NOT pruned:
+// the skip rule applies to descendants encountered during traversal,
+// so a user who explicitly asks to search inside node_modules still
+// gets results.
+var defaultSkipDirs = map[string]bool{
+	".git": true, ".hg": true, ".svn": true,
+	"node_modules": true, "bower_components": true,
+	"vendor":         true,
+	"target":         true,
+	"dist":           true,
+	"build":          true,
+	"out":            true,
+	".next":          true,
+	".nuxt":          true,
+	".cache":         true,
+	".parcel-cache":  true,
+	"__pycache__":    true,
+	".venv":          true,
+	"venv":           true,
+	".tox":           true,
+	".pytest_cache":  true,
+	".mypy_cache":    true,
+	".gradle":        true,
+	".idea":          true,
+	".vscode":        true,
+	"coverage":       true,
+}
+
+// binaryExts is a fast-path: files with these extensions are skipped by
+// Grep without opening them. The NUL-byte sniff catches everything
+// else; this just avoids the open() syscall on the obvious cases.
+var binaryExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true, ".webp": true, ".ico": true, ".tiff": true,
+	".pdf":  true,
+	".zip":  true, ".tar": true, ".gz": true, ".bz2": true, ".xz": true, ".7z": true, ".rar": true,
+	".exe":  true, ".dll": true, ".so": true, ".dylib": true, ".a": true, ".o": true,
+	".class": true, ".jar": true, ".war": true,
+	".mp3":   true, ".mp4": true, ".wav": true, ".avi": true, ".mov": true, ".mkv": true, ".flac": true, ".ogg": true,
+	".woff":  true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	".pyc":   true, ".pyo": true,
+	".bin":   true, ".dat": true,
+}
 
 // Config controls Workspace tool behaviour.
 type Config struct {
@@ -42,6 +101,12 @@ type Config struct {
 	// MaxResults caps the number of entries returned by Glob and
 	// Grep. 0 uses the default (100).
 	MaxResults int
+
+	// SkipDirs overrides the default set of directory basenames that
+	// Glob and Grep prune during traversal (.git, node_modules, vendor,
+	// build, dist, target, .venv, etc.). nil uses the default set.
+	// Pass an empty (non-nil) map to disable skipping entirely.
+	SkipDirs map[string]bool
 }
 
 // Workspace exposes a set of safe, read-only filesystem tools sandboxed to
@@ -61,6 +126,7 @@ type Workspace struct {
 	root         string
 	maxFileBytes int64
 	maxResults   int
+	skipDirs     map[string]bool
 	bindings     []gocode.ToolBinding
 }
 
@@ -98,10 +164,15 @@ func NewReadOnly(cfg Config) (*Workspace, error) {
 	if maxRes == 0 {
 		maxRes = defaultMaxResults
 	}
+	skip := cfg.SkipDirs
+	if skip == nil {
+		skip = defaultSkipDirs
+	}
 	w := &Workspace{
 		root:         abs,
 		maxFileBytes: maxBytes,
 		maxResults:   maxRes,
+		skipDirs:     skip,
 	}
 	w.bindings = w.buildBindings()
 	return w, nil
@@ -208,23 +279,32 @@ func (w *Workspace) buildBindings() []gocode.ToolBinding {
 
 	findFilesTool := gocode.NewTool(
 		"Glob",
-		"Finds files whose names match a glob pattern under a path relative to the workspace root. "+
-			"Results are root-relative slash paths. Capped at the configured MaxResults limit.",
+		"Finds files matching a glob pattern under a path relative to the workspace root. "+
+			"Supports `*` (any characters within a path segment), `?` (single char), `[abc]` (char class), "+
+			"and `**` (any number of path segments — e.g. `**/*.go` for all Go files at any depth, "+
+			"`pkg/**/*_test.go` for test files under pkg/). "+
+			"Patterns without `/` or `**` match against the file's basename only (so `*.go` works as expected). "+
+			"Common bloat directories (.git, node_modules, vendor, target, dist, build, .venv, __pycache__, etc.) "+
+			"are skipped automatically. To search inside one, pass it explicitly as `path`. "+
+			"Results are root-relative slash paths, capped at MaxResults.",
 		gocode.Object(
-			gocode.String("pattern", "Glob pattern matched against file names (e.g. \"*.go\", \"*_test.go\").", gocode.Required()),
+			gocode.String("pattern", "Glob pattern. Examples: `*.go`, `**/*.ts`, `pkg/**/*_test.go`.", gocode.Required()),
 			gocode.String("path", `Directory to search under, relative to the workspace root. Defaults to ".".`),
 		),
 	)
 
 	searchTextTool := gocode.NewTool(
 		"Grep",
-		"Searches file contents for lines matching a regular expression. "+
-			"Returns matching lines as \"file:line: content\" entries. "+
-			"Capped at MaxResults matches.",
+		"Searches file contents for lines matching a pattern. The pattern is treated as a Go regular expression — "+
+			"plain literals (no regex metachars) take a fast non-regex path automatically. "+
+			"Returns matches as {file, line, text} objects, sorted by file then line. "+
+			"Skips common bloat directories (.git, node_modules, vendor, build, dist, target, .venv, __pycache__, etc.) "+
+			"and binary files (by extension and by NUL-byte sniff). "+
+			"Walks the tree in parallel; capped at MaxResults matches.",
 		gocode.Object(
-			gocode.String("pattern", "Regular expression to search for.", gocode.Required()),
+			gocode.String("pattern", "Pattern to search for. Plain literals are fastest; full Go regex syntax is supported.", gocode.Required()),
 			gocode.String("path", `Directory to search under, relative to the workspace root. Defaults to ".".`),
-			gocode.String("include", `Optional glob to filter which file names are searched (e.g. "*.go").`),
+			gocode.String("include", `Optional glob filter, applied to each file's path relative to the search base (e.g. "*.go", "src/**/*.ts").`),
 		),
 	)
 
@@ -321,16 +401,23 @@ func (w *Workspace) findFiles(_ context.Context, in findFilesInput) (string, err
 	}
 
 	var matches []string
-	err = filepath.WalkDir(absBase, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(absBase, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // skip unreadable dirs
 		}
 		if d.IsDir() {
+			if p != absBase && w.skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		matched, _ := filepath.Match(pattern, d.Name())
-		if matched {
-			matches = append(matches, w.relPath(path))
+		// Path relative to the search base, with forward slashes —
+		// gives the model the natural "src/foo/bar.go" form to match
+		// against patterns like "src/**/*.go".
+		rel, _ := filepath.Rel(absBase, p)
+		rel = filepath.ToSlash(rel)
+		if globMatch(pattern, rel) {
+			matches = append(matches, w.relPath(p))
 			if len(matches) >= w.maxResults {
 				return filepath.SkipAll
 			}
@@ -343,7 +430,7 @@ func (w *Workspace) findFiles(_ context.Context, in findFilesInput) (string, err
 	return gocode.JSONResult(matches)
 }
 
-func (w *Workspace) searchText(_ context.Context, in searchTextInput) (string, error) {
+func (w *Workspace) searchText(ctx context.Context, in searchTextInput) (string, error) {
 	base := in.Path
 	if base == "" {
 		base = "."
@@ -355,59 +442,231 @@ func (w *Workspace) searchText(_ context.Context, in searchTextInput) (string, e
 	if in.Pattern == "" {
 		return "", fmt.Errorf("Grep: pattern is required")
 	}
-	re, err := regexp.Compile(in.Pattern)
+	m, err := compileMatcher(in.Pattern)
 	if err != nil {
 		return "", fmt.Errorf("Grep: invalid pattern: %w", err)
 	}
 
-	type match struct {
-		File string `json:"file"`
-		Line int    `json:"line"`
-		Text string `json:"text"`
-	}
-	var matches []match
+	// Parallel scan: a walker goroutine collects candidate file paths
+	// and feeds them to a worker pool. Workers open and scan files
+	// independently. A single goroutine merges matches into a slice
+	// and cancels the workerCtx once the cap is reached.
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	err = filepath.WalkDir(absBase, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if in.Include != "" {
-			ok, _ := filepath.Match(in.Include, d.Name())
-			if !ok {
+	pathsCh := make(chan string, 64)
+	resultsCh := make(chan grepMatch, 64)
+
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers < 2 {
+		workers = 2
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range pathsCh {
+				if workerCtx.Err() != nil {
+					continue // drain
+				}
+				w.grepFile(workerCtx, p, m, resultsCh)
+			}
+		}()
+	}
+
+	// Walker.
+	go func() {
+		defer close(pathsCh)
+		_ = filepath.WalkDir(absBase, func(p string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
 				return nil
 			}
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil // skip unreadable files
-		}
-		defer f.Close()
+			if workerCtx.Err() != nil {
+				return filepath.SkipAll
+			}
+			if d.IsDir() {
+				if p != absBase && w.skipDirs[d.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if in.Include != "" {
+				rel, _ := filepath.Rel(absBase, p)
+				if !globMatch(in.Include, filepath.ToSlash(rel)) {
+					return nil
+				}
+			}
+			if binaryExts[strings.ToLower(filepath.Ext(p))] {
+				return nil
+			}
+			select {
+			case pathsCh <- p:
+			case <-workerCtx.Done():
+				return filepath.SkipAll
+			}
+			return nil
+		})
+	}()
 
-		scanner := bufio.NewScanner(f)
-		lineNum := 0
-		for scanner.Scan() {
+	// Closer: when all workers exit, close the result channel so the
+	// merger loop terminates.
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	// Merger.
+	var matches []grepMatch
+	for r := range resultsCh {
+		if len(matches) < w.maxResults {
+			matches = append(matches, r)
+			if len(matches) >= w.maxResults {
+				cancel()
+			}
+		}
+	}
+
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Order is non-deterministic with parallel workers — sort for
+	// stable output (file, then line).
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].File != matches[j].File {
+			return matches[i].File < matches[j].File
+		}
+		return matches[i].Line < matches[j].Line
+	})
+	return gocode.JSONResult(matches)
+}
+
+// grepMatch is one Grep result row.
+type grepMatch struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+	Text string `json:"text"`
+}
+
+// grepFile is the per-file scanner used by searchText. It opens the file,
+// sniffs for a NUL byte to skip binaries that slipped past the extension
+// filter, and emits matches on resultsCh until the workerCtx is cancelled.
+func (w *Workspace) grepFile(ctx context.Context, p string, m matcher, resultsCh chan<- grepMatch) {
+	f, err := os.Open(p)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	br := bufio.NewReader(f)
+
+	// Sniff first chunk for a NUL byte to detect binary files that
+	// don't have a known extension.
+	head, _ := br.Peek(binarySniffBytes)
+	if bytes.IndexByte(head, 0) >= 0 {
+		return
+	}
+
+	rel := w.relPath(p)
+	lineNum := 0
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		line, err := br.ReadSlice('\n')
+		if len(line) > 0 {
 			lineNum++
-			line := scanner.Text()
-			if re.MatchString(line) {
-				matches = append(matches, match{
-					File: w.relPath(path),
-					Line: lineNum,
-					Text: line,
-				})
-				if len(matches) >= w.maxResults {
-					return filepath.SkipAll
+			// Trim the trailing newline (and CR) before matching/output.
+			trimmed := line
+			for len(trimmed) > 0 && (trimmed[len(trimmed)-1] == '\n' || trimmed[len(trimmed)-1] == '\r') {
+				trimmed = trimmed[:len(trimmed)-1]
+			}
+			if m.match(trimmed) {
+				select {
+				case resultsCh <- grepMatch{File: rel, Line: lineNum, Text: string(trimmed)}:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("Grep: %w", err)
+		if err != nil {
+			// io.EOF or bufio.ErrBufferFull — either way stop on this file.
+			return
+		}
 	}
-	return gocode.JSONResult(matches)
+}
+
+// matcher abstracts over the literal fast-path and full regex.
+type matcher interface {
+	match(line []byte) bool
+}
+
+type literalMatcher struct{ pat []byte }
+
+func (l *literalMatcher) match(line []byte) bool { return bytes.Contains(line, l.pat) }
+
+type regexMatcher struct{ re *regexp.Regexp }
+
+func (r *regexMatcher) match(line []byte) bool { return r.re.Match(line) }
+
+// regexMetachars is the set of characters that turn a string from a plain
+// literal into a non-trivial regex. If a pattern contains none of these,
+// we can search with bytes.Contains, which is dramatically faster than
+// running the regex engine per line.
+const regexMetachars = `\.+*?()|[]{}^$`
+
+func compileMatcher(p string) (matcher, error) {
+	if p != "" && !strings.ContainsAny(p, regexMetachars) {
+		return &literalMatcher{pat: []byte(p)}, nil
+	}
+	re, err := regexp.Compile(p)
+	if err != nil {
+		return nil, err
+	}
+	return &regexMatcher{re: re}, nil
+}
+
+// globMatch reports whether path (relative, forward-slash) matches
+// pattern. Supports *, ?, [...] per segment plus ** for cross-segment
+// matching. If the pattern has no '/' or '**' it falls back to a
+// basename-only match — preserving the historical "*.go" behavior.
+func globMatch(pattern, p string) bool {
+	if !strings.Contains(pattern, "/") && !strings.Contains(pattern, "**") {
+		ok, _ := path.Match(pattern, path.Base(p))
+		return ok
+	}
+	patSegs := strings.Split(pattern, "/")
+	pathSegs := strings.Split(p, "/")
+	return matchSegments(patSegs, pathSegs)
+}
+
+func matchSegments(pat, p []string) bool {
+	if len(pat) == 0 {
+		return len(p) == 0
+	}
+	if pat[0] == "**" {
+		// ** matches zero or more path segments. Try every
+		// possible split.
+		for i := 0; i <= len(p); i++ {
+			if matchSegments(pat[1:], p[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(p) == 0 {
+		return false
+	}
+	ok, _ := path.Match(pat[0], p[0])
+	if !ok {
+		return false
+	}
+	return matchSegments(pat[1:], p[1:])
 }
 
 func (w *Workspace) readFile(_ context.Context, in readFileInput) (string, error) {

@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/lukemuz/gocode"
 )
@@ -31,7 +34,7 @@ func (s *session) repl(ctx context.Context) {
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
 	for {
-		fmt.Fprint(os.Stderr, "\n> ")
+		fmt.Fprint(os.Stderr, "\n"+boldCyan("❯")+" ")
 		if !scanner.Scan() {
 			fmt.Fprintln(os.Stderr)
 			return
@@ -58,26 +61,90 @@ func (s *session) runTurn(ctx context.Context, input string) {
 	turnCtx, cancel := signal.NotifyContext(ctx, syscall.SIGINT)
 	defer cancel()
 
+	// Track tool_use blocks as they stream so we can show the tool name
+	// (and a useful preview of its arguments) when the result lands.
+	toolNames := map[string]string{}
+	toolInputs := map[string]json.RawMessage{}
+
+	// Spinner with two-mode label:
+	//   - "thinking…"     between turns / iterations (model latency)
+	//   - "running tools…" when deltas pause for >500ms within a turn
+	//                      (proxy signal that tool execution is in flight)
+	sp := newSpinner(os.Stderr)
+	defer sp.Stop()
+
+	var idleMu sync.Mutex
+	var idleTimer *time.Timer
+	armIdle := func() {
+		idleMu.Lock()
+		defer idleMu.Unlock()
+		if idleTimer != nil {
+			idleTimer.Stop()
+		}
+		idleTimer = time.AfterFunc(500*time.Millisecond, func() {
+			sp.Start("running tools…")
+		})
+	}
+	disarmIdle := func() {
+		idleMu.Lock()
+		defer idleMu.Unlock()
+		if idleTimer != nil {
+			idleTimer.Stop()
+			idleTimer = nil
+		}
+	}
+
+	// Start the spinner immediately — first model latency is the most
+	// common "is it doing anything?" moment.
+	sp.Start("thinking…")
+	// And restart it before each subsequent iteration's model call.
+	s.agent.Hooks.OnIteration = func(ctx context.Context, iter int, history []gocode.Message) {
+		if iter == 0 {
+			return // already started above
+		}
+		sp.Start("thinking…")
+	}
+	defer func() { s.agent.Hooks.OnIteration = nil }()
+
 	result, err := s.agent.StepStream(turnCtx, s.history,
 		func(b gocode.ContentBlock) {
-			if b.Type == gocode.TypeText {
+			sp.Stop()
+			armIdle()
+			switch b.Type {
+			case gocode.TypeText:
 				fmt.Print(b.Text)
+			case gocode.TypeToolUse:
+				if b.ID == "" {
+					return
+				}
+				if b.Name != "" {
+					toolNames[b.ID] = b.Name
+				}
+				if len(b.Input) > 0 {
+					toolInputs[b.ID] = b.Input
+				}
 			}
 		},
 		func(results []gocode.ToolResult) {
+			disarmIdle()
+			sp.Stop()
+			fmt.Fprintln(os.Stderr)
 			for _, r := range results {
-				status := "ok"
-				if r.IsError {
-					status = "error"
+				name := toolNames[r.ToolUseID]
+				if name == "" {
+					name = "tool"
 				}
-				fmt.Fprintf(os.Stderr, "\n[tool %s: %d bytes]\n", status, len(r.Content))
+				preview := toolInputPreview(toolInputs[r.ToolUseID])
+				printToolResult(name, preview, r.IsError, len(r.Content))
 			}
 		},
 	)
+	disarmIdle()
+	sp.Stop()
 	fmt.Println()
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintln(os.Stderr, red("✗ error: ")+err.Error())
 		if n := len(s.history); n > 0 {
 			s.history = s.history[:n-1]
 		}
@@ -133,19 +200,27 @@ func (s *session) runCommand(ctx context.Context, line string) bool {
 }
 
 func (s *session) printHelp() {
-	for _, line := range []string{
-		"/help                    show this list",
-		"/exit | /quit            leave",
-		"/reset | /clear          clear conversation history",
-		"/compact [instructions]  summarize older turns to free context (cache-resetting)",
-		"/tokens                  print accumulated token usage and cache stats",
-		"/memory                  print the loaded project memory (AGENTS.md / CLAUDE.md)",
-		"/tools                   list the tools currently available to the agent",
-		"/model <id>              switch the main-agent model (e.g. claude-opus-4-7)",
-		"/log                     print the active JSONL log path (if any)",
-	} {
-		fmt.Fprintln(os.Stderr, line)
+	rows := [][2]string{
+		{"/help", "show this list"},
+		{"/exit | /quit", "leave"},
+		{"/reset | /clear", "clear conversation history"},
+		{"/compact [instructions]", "summarize older turns to free context (cache-resetting)"},
+		{"/tokens", "print accumulated token usage and cache stats"},
+		{"/memory", "print the loaded project memory (AGENTS.md / CLAUDE.md)"},
+		{"/tools", "list the tools currently available to the agent"},
+		{"/model <id>", "switch the main-agent model (e.g. anthropic/claude-opus-4.7)"},
+		{"/log", "print the active JSONL log path (if any)"},
 	}
+	for _, r := range rows {
+		fmt.Fprintf(os.Stderr, "  %s  %s\n", cyan(padRight(r[0], 24)), grey(r[1]))
+	}
+}
+
+func padRight(s string, n int) string {
+	if len(s) >= n {
+		return s
+	}
+	return s + strings.Repeat(" ", n-len(s))
 }
 
 func (s *session) doCompact(ctx context.Context, instructions string) {
@@ -154,10 +229,12 @@ func (s *session) doCompact(ctx context.Context, instructions string) {
 		return
 	}
 	before := len(s.history)
-	fmt.Fprintln(os.Stderr, "compacting...")
+	sp := newSpinner(os.Stderr)
+	sp.Start("compacting…")
 	out, usage, err := compact(ctx, s.summarizer, s.history, 4, instructions)
+	sp.Stop()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "compact failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, red("✗ compact failed: ")+err.Error())
 		return
 	}
 	s.history = out
@@ -166,22 +243,33 @@ func (s *session) doCompact(ctx context.Context, instructions string) {
 	s.usage.CacheCreationTokens += usage.CacheCreationTokens
 	s.usage.CacheReadTokens += usage.CacheReadTokens
 
-	fmt.Fprintf(os.Stderr, "compacted: %d → %d messages (summarizer used %d in / %d out tokens)\n",
-		before, len(s.history), usage.InputTokens, usage.OutputTokens)
+	fmt.Fprintf(os.Stderr, "%s %s → %s messages %s\n",
+		green("✓ compacted"),
+		bold(fmt.Sprintf("%d", before)),
+		bold(fmt.Sprintf("%d", len(s.history))),
+		grey(fmt.Sprintf("(summarizer used %d in / %d out tokens)", usage.InputTokens, usage.OutputTokens)),
+	)
 }
 
 func (s *session) printTokens() {
 	u := s.usage
 	total := u.InputTokens + u.OutputTokens
-	fmt.Fprintf(os.Stderr, "tokens this session:\n")
-	fmt.Fprintf(os.Stderr, "  input:           %d\n", u.InputTokens)
-	fmt.Fprintf(os.Stderr, "  output:          %d\n", u.OutputTokens)
-	fmt.Fprintf(os.Stderr, "  cache reads:     %d\n", u.CacheReadTokens)
-	fmt.Fprintf(os.Stderr, "  cache writes:    %d\n", u.CacheCreationTokens)
-	fmt.Fprintf(os.Stderr, "  total billable:  %d (input+output, cache reads billed at ~10%%)\n", total)
+	row := func(label string, value string, hint string) {
+		fmt.Fprintf(os.Stderr, "  %s %s %s\n",
+			grey(padRight(label, 16)),
+			bold(value),
+			grey(hint),
+		)
+	}
+	fmt.Fprintln(os.Stderr, bold("tokens this session"))
+	row("input", fmt.Sprintf("%d", u.InputTokens), "")
+	row("output", fmt.Sprintf("%d", u.OutputTokens), "")
+	row("cache reads", fmt.Sprintf("%d", u.CacheReadTokens), "")
+	row("cache writes", fmt.Sprintf("%d", u.CacheCreationTokens), "")
+	row("total billable", fmt.Sprintf("%d", total), "(cache reads billed at ~10%)")
 	if u.InputTokens > 0 {
 		ratio := float64(u.CacheReadTokens) / float64(u.InputTokens+u.CacheReadTokens) * 100
-		fmt.Fprintf(os.Stderr, "  cache hit rate:  %.1f%%\n", ratio)
+		row("cache hit rate", fmt.Sprintf("%.1f%%", ratio), "")
 	}
 }
 
@@ -197,17 +285,72 @@ func (s *session) printTools() {
 	for _, b := range s.agent.Tools.Bindings {
 		flag := ""
 		if b.Meta.RequiresConfirmation {
-			flag = " [confirm]"
+			flag = " " + yellow("[confirm]")
 		}
-		fmt.Fprintf(os.Stderr, "  %s%s\n", b.Tool.Name, flag)
+		fmt.Fprintf(os.Stderr, "  %s%s\n", cyan(b.Tool.Name), flag)
 	}
 }
 
 func (s *session) changeModel(model string) {
 	if model == "" {
-		fmt.Fprintln(os.Stderr, "usage: /model <model-id>")
+		fmt.Fprintln(os.Stderr, dim("usage: /model <model-id>"))
 		return
 	}
 	s.agent.Client = s.agent.Client.WithModel(model)
-	fmt.Fprintf(os.Stderr, "main-agent model set to %s (subagent models unchanged)\n", model)
+	fmt.Fprintf(os.Stderr, "%s main-agent model set to %s %s\n",
+		green("✓"),
+		bold(model),
+		grey("(subagent models unchanged)"),
+	)
+}
+
+// printToolResult emits one line for a completed tool call:
+//
+//	✓ tool_name  preview…                       1.2 KiB
+//	✗ tool_name  preview…                       error
+func printToolResult(name, preview string, isError bool, contentLen int) {
+	mark := green("✓")
+	if isError {
+		mark = red("✗")
+	}
+	left := fmt.Sprintf(" %s %s", mark, cyan(name))
+	if preview != "" {
+		left += "  " + dim(preview)
+	}
+	right := humanBytes(contentLen)
+	if isError {
+		right = red("error")
+	}
+	fmt.Fprintf(os.Stderr, "%s  %s\n", left, grey(right))
+}
+
+// toolInputPreview returns a short, single-line preview of the most
+// useful argument the model passed. It tries a small priority list of
+// well-known field names; falls back to the raw JSON when nothing
+// matches. Always single-line and length-capped.
+func toolInputPreview(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err == nil {
+		// Priority order: prefer the field that's most informative
+		// per tool family. First non-empty string wins.
+		for _, k := range []string{"command", "path", "file_path", "url", "pattern", "query", "task", "description", "name", "old_str"} {
+			if v, ok := m[k]; ok {
+				if vs, ok := v.(string); ok && vs != "" {
+					return truncate(oneLine(fmt.Sprintf("%s=%s", k, vs)), 80)
+				}
+			}
+		}
+		// Generic fallback: list the first few keys.
+		var keys []string
+		for k := range m {
+			keys = append(keys, k)
+		}
+		if len(keys) > 0 {
+			return dim(fmt.Sprintf("(%s)", strings.Join(keys, ", ")))
+		}
+	}
+	return truncate(oneLine(string(input)), 80)
 }

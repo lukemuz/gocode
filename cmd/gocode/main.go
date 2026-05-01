@@ -19,12 +19,20 @@
 //
 // Usage:
 //
-//	export ANTHROPIC_API_KEY=sk-ant-...
-//	go run ./cmd/gocode -dir . -bash standard
+//	export OPENROUTER_API_KEY=sk-or-...
+//	cd ~/your-project && gocode
+//
+// The agent is sandboxed to the current working directory by default.
+// Pass -dir to operate on a different directory.
+//
+// Models default to Anthropic Claude routes on OpenRouter
+// (anthropic/claude-sonnet-4.6, anthropic/claude-haiku-4.5,
+// anthropic/claude-opus-4.7). Override with -model / -explore-model /
+// -plan-model to use any OpenRouter-supported model id.
 //
 // Flags:
 //
-//	-dir            working directory the agent is sandboxed to
+//	-dir            working directory the agent is sandboxed to (default cwd)
 //	-model          main-agent model id (default Sonnet)
 //	-explore-model  model used for the explore subagent (default Haiku)
 //	-plan-model     model used for the plan subagent (default Opus)
@@ -57,13 +65,14 @@ import (
 	"time"
 
 	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/gocode/providers/openrouter"
 	"github.com/lukemuz/gocode/tools/bash"
 	"github.com/lukemuz/gocode/tools/batch"
 	"github.com/lukemuz/gocode/tools/clock"
 	"github.com/lukemuz/gocode/tools/editor"
 	"github.com/lukemuz/gocode/tools/subagent"
 	"github.com/lukemuz/gocode/tools/todo"
+	"github.com/lukemuz/gocode/tools/web"
 	"github.com/lukemuz/gocode/tools/workspace"
 )
 
@@ -71,11 +80,11 @@ const mainSystemPrompt = `You are gocode, a fast and economical CLI coding assis
 
 You operate inside a workspace directory. Available tools:
 - list_directory, Glob, Grep, read_file, file_info: read-only filesystem inspection
-- str_replace_based_edit_tool: view/create/str_replace/insert against files (Anthropic's trained editor)
-- bash: run shell commands (Anthropic's trained bash; safety policy varies by configuration)
+- str_replace_based_edit_tool: view/create/str_replace/insert against files
+- bash: run shell commands (safety policy varies by configuration)
 - todo_write, todo_read: maintain a short planning checklist for multi-step work
 - batch: run several read-only tool calls concurrently in one turn (great for fanning out greps and reads)
-- web_search, web_fetch (when available): Anthropic-hosted tools for searching the web and fetching specific URLs (e.g. library docs)
+- web_fetch (when available): download an http(s) URL and return its content as text. HTML is converted to a plain-text approximation; long pages paginate via max_length + start_index. Use this for documentation lookups and inspecting URLs from error messages.
 - explore (when available): delegate inspection to a faster, cheaper specialist that returns a summary
 - plan (when available): delegate hard reasoning or design questions to a stronger model
 - now: current time
@@ -112,12 +121,12 @@ Operating principles:
 4. Be honest about what you don't know.`
 
 func main() {
-	dir := flag.String("dir", ".", "working directory the agent is sandboxed to")
-	model := flag.String("model", gocode.ModelSonnet, "main-agent model id")
-	exploreModel := flag.String("explore-model", gocode.ModelHaiku, "model id for the explore subagent")
-	planModel := flag.String("plan-model", gocode.ModelOpus, "model id for the plan subagent")
+	dir := flag.String("dir", ".", "working directory the agent is sandboxed to (defaults to the current directory)")
+	model := flag.String("model", envOr("GOCODE_MODEL", "anthropic/claude-sonnet-4.6"), "main-agent model id (any OpenRouter slug; env: GOCODE_MODEL)")
+	exploreModel := flag.String("explore-model", envOr("GOCODE_EXPLORE_MODEL", "anthropic/claude-haiku-4.5"), "model id for the explore subagent (env: GOCODE_EXPLORE_MODEL)")
+	planModel := flag.String("plan-model", envOr("GOCODE_PLAN_MODEL", "anthropic/claude-opus-4.7"), "model id for the plan subagent (env: GOCODE_PLAN_MODEL)")
 	noSubagents := flag.Bool("no-subagents", false, "disable explore and plan subagent tools")
-	noWeb := flag.Bool("no-web", false, "disable Anthropic-hosted web_search and web_fetch tools")
+	noFetch := flag.Bool("no-fetch", false, "disable the native web_fetch tool")
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
 	autoYes := flag.Bool("yes", false, "auto-approve every confirmation prompt")
 	maxIter := flag.Int("max-iter", 30, "max model calls per turn")
@@ -132,9 +141,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	provider, err := anthropic.NewProviderFromEnv()
+	provider, err := openrouter.NewProviderFromEnv()
 	if err != nil {
-		log.Fatalf("anthropic provider: %v", err)
+		log.Fatalf("openrouter provider: %v", err)
 	}
 
 	mainClient := mustClient(provider, *model)
@@ -190,8 +199,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	subBashBinding := anthropic.BashTool(subBashTool.TrainedHandler())
-	subBashToolset := gocode.Tools(subBashBinding).Wrap(roMiddleware...)
+	subBashToolset := subBashTool.Toolset().Wrap(roMiddleware...)
 
 	// Batch tool for read-only fan-out. Built from already-wrapped read-only
 	// bindings so each sub-call inherits the timeout/limit/logging stack.
@@ -240,16 +248,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mainBashBinding := anthropic.BashTool(mainBashTool.TrainedHandler())
-	mainBashBinding.Meta.RequiresConfirmation = mainBashTool.Toolset().Bindings[0].Meta.RequiresConfirmation
+	mainBashBindings := mainBashTool.Toolset().Bindings
 
 	ed, err := editor.New(editor.Config{Root: *dir})
 	if err != nil {
 		log.Fatal(err)
 	}
-	editorBinding := anthropic.TextEditor20250728(ed.Handler())
+	editorBindings := ed.Toolset().Bindings
 
-	editTools := gocode.Tools(mainBashBinding, editorBinding).Wrap(
+	editTools := gocode.Tools(append(mainBashBindings, editorBindings...)...).Wrap(
 		gocode.WithConfirmation(confirm),
 		gocode.WithTimeout(60*time.Second),
 		gocode.WithResultLimit(64*1024),
@@ -258,23 +265,23 @@ func main() {
 
 	// --- main agent assembly ----------------------------------------------
 
+	var webTools gocode.Toolset
+	if !*noFetch {
+		webTools = web.New(web.Config{}).Toolset().Wrap(
+			gocode.WithTimeout(30*time.Second),
+			gocode.WithResultLimit(64*1024),
+			gocode.WithLogging(logger),
+		)
+	}
+
 	mainTools := gocode.MustJoin(
 		roTools,
 		gocode.Tools(roBatchBinding),
 		editTools,
 		todo.New().Toolset(),
+		webTools,
 		gocode.Tools(subagentBindings...),
 	).CacheLast(gocode.Ephemeral()) // cache the entire tool block — stable per session
-
-	// Anthropic's hosted web tools — server-executed by the API, no Go
-	// handler needed. Useful for documentation lookups and reading
-	// arbitrary URLs the model encounters in error messages or notes.
-	if !*noWeb {
-		mainTools = mainTools.WithProviderTools(
-			anthropic.WebSearch(anthropic.WebSearchOpts{MaxUses: 5}),
-			anthropic.WebFetch(anthropic.WebFetchOpts{MaxUses: 5, MaxContentTokens: 8000}),
-		)
-	}
 
 	memory := loadProjectMemory(*dir)
 	system := mainSystemPrompt
@@ -296,23 +303,34 @@ func main() {
 
 	// Summarizer for /compact runs on Haiku — cheap and plenty capable
 	// for transcript summarization. Independent of the user's main model.
-	summarizer := mainClient.WithModel(gocode.ModelHaiku)
+	summarizer := mainClient.WithModel(envOr("GOCODE_SUMMARIZE_MODEL", "anthropic/claude-haiku-4.5"))
 
 	// --- run ---------------------------------------------------------------
 
 	abs, _ := absDir(*dir)
-	subStatus := "on"
+	subStatus := green("on")
 	if *noSubagents {
-		subStatus = "off"
+		subStatus = dim("off")
 	}
-	fmt.Fprintf(os.Stderr, "gocode  model=%s  bash=%s  subagents=%s  dir=%s\n", *model, *bashMode, subStatus, abs)
+	row := func(label, value string) {
+		fmt.Fprintf(os.Stderr, "  %s %s\n", grey(padRight(label, 10)), value)
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s %s\n", boldCyan("▍gocode"), grey("— a fast, economical CLI coding agent"))
+	fmt.Fprintln(os.Stderr)
+	row("model", bold(*model))
+	row("bash", *bashMode)
+	row("subagents", subStatus)
 	if !*noSubagents {
-		fmt.Fprintf(os.Stderr, "        explore=%s  plan=%s\n", *exploreModel, *planModel)
+		row("explore", *exploreModel)
+		row("plan", *planModel)
 	}
+	row("dir", abs)
 	if resolvedLog != "" {
-		fmt.Fprintf(os.Stderr, "        log=%s\n", resolvedLog)
+		row("log", resolvedLog)
 	}
-	fmt.Fprintln(os.Stderr, "type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, dim("  type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit."))
 
 	s := &session{
 		agent:      agent,
@@ -400,6 +418,15 @@ func compactJSON(raw json.RawMessage) string {
 	return s
 }
 
+// envOr returns the value of env var name, or fallback if the variable
+// is unset or empty. Used to give CLI flags env-var defaults.
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func parseBashMode(s string) (bash.Mode, error) {
 	switch strings.ToLower(s) {
 	case "restricted", "":
@@ -413,12 +440,8 @@ func parseBashMode(s string) (bash.Mode, error) {
 }
 
 func absDir(dir string) (string, error) {
-	abs, err := os.Getwd()
-	if err != nil {
-		return dir, err
+	if dir == "" {
+		dir = "."
 	}
-	if dir == "." || dir == "" {
-		return abs, nil
-	}
-	return dir, nil
+	return filepath.Abs(dir)
 }
