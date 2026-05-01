@@ -305,18 +305,29 @@ func main() {
 	// --- run ---------------------------------------------------------------
 
 	abs, _ := absDir(*dir)
-	subStatus := "on"
+	subStatus := green("on")
 	if *noSubagents {
-		subStatus = "off"
+		subStatus = dim("off")
 	}
-	fmt.Fprintf(os.Stderr, "gocode  model=%s  bash=%s  subagents=%s  dir=%s\n", *model, *bashMode, subStatus, abs)
+	row := func(label, value string) {
+		fmt.Fprintf(os.Stderr, "  %s %s\n", grey(padRight(label, 10)), value)
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s %s\n", boldCyan("▍gocode"), grey("— a fast, economical CLI coding agent"))
+	fmt.Fprintln(os.Stderr)
+	row("model", bold(*model))
+	row("bash", *bashMode)
+	row("subagents", subStatus)
 	if !*noSubagents {
-		fmt.Fprintf(os.Stderr, "        explore=%s  plan=%s\n", *exploreModel, *planModel)
+		row("explore", *exploreModel)
+		row("plan", *planModel)
 	}
+	row("dir", abs)
 	if resolvedLog != "" {
-		fmt.Fprintf(os.Stderr, "        log=%s\n", resolvedLog)
+		row("log", resolvedLog)
 	}
-	fmt.Fprintln(os.Stderr, "type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, dim("  type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit."))
 
 	s := &session{
 		agent:      agent,
