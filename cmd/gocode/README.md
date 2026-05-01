@@ -10,12 +10,14 @@ You'll need an OpenRouter API key in your environment for any of these:
 export OPENROUTER_API_KEY=sk-or-...
 ```
 
-Models default to Anthropic's Claude routes on OpenRouter, but `-model`,
-`-explore-model`, and `-plan-model` accept any OpenRouter slug
-(e.g. `openai/gpt-5`, `google/gemini-2.5-pro`). Each flag has a matching
-env var (`GOCODE_MODEL`, `GOCODE_EXPLORE_MODEL`, `GOCODE_PLAN_MODEL`,
-plus `GOCODE_SUMMARIZE_MODEL` for the `/compact` summarizer) so you can
-pin tiers in your shell rc or a per-project `.envrc`.
+Models default to `x-ai/grok-4.3` for the main agent and plan subagent,
+and `openai/gpt-oss-120b` for the explore subagent (super fast and cheap
+for inspection workloads). `-model`, `-explore-model`, and `-plan-model`
+accept any OpenRouter slug (e.g. `openai/gpt-5`, `google/gemini-2.5-pro`,
+`anthropic/claude-sonnet-4.6`). Each flag has a matching env var
+(`GOCODE_MODEL`, `GOCODE_EXPLORE_MODEL`, `GOCODE_PLAN_MODEL`, plus
+`GOCODE_SUMMARIZE_MODEL` for the `/compact` summarizer) so you can pin
+tiers in your shell rc or a per-project `.envrc`.
 
 ### Option A — install once, run anywhere (recommended)
 
@@ -75,8 +77,8 @@ The agent operates on the current working directory by default. Pass `-dir <path
 
 You should see:
 ```
-gocode  model=anthropic/claude-sonnet-4.6  bash=restricted  subagents=on  dir=/abs/path
-        explore=anthropic/claude-haiku-4.5  plan=anthropic/claude-opus-4.7
+gocode  model=x-ai/grok-4.3  bash=restricted  subagents=on  dir=/abs/path
+        explore=openai/gpt-oss-120b  plan=x-ai/grok-4.3
         log=/home/you/.config/gocode/sessions/2026-04-30T14-22-13.jsonl
 type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
 > 
@@ -87,14 +89,14 @@ If you get `openrouter provider: OPENROUTER_API_KEY environment variable is not 
 ## What's running
 
 ```
-main agent (Sonnet by default)
+main agent (x-ai/grok-4.3 by default)
   ├── direct tools  workspace + bash + str_replace_based_edit_tool
   │                 + todo + clock + batch
-  ├── explore       subagent on Haiku — read-only fs + restricted bash + batch
-  └── plan          subagent on Opus — read-only fs only, no shell, no edits
+  ├── explore       subagent on openai/gpt-oss-120b — read-only fs + restricted bash + batch
+  └── plan          subagent on x-ai/grok-4.3 — read-only fs only, no shell, no edits
 ```
 
-Why three agents? Cost tiering and context isolation. The main Sonnet decides what work to do; cheap inspection happens on Haiku and never enters the main context (only the subagent's final summary returns); hard reasoning escalates to Opus on demand.
+Why three agents? Cost tiering and context isolation. The main Grok decides what work to do; cheap inspection happens on gpt-oss-120b and never enters the main context (only the subagent's final summary returns); hard reasoning stays on a strong model via the `plan` tool when wanted.
 
 ## Tools available to the main agent
 
@@ -107,8 +109,8 @@ Why three agents? Cost tiering and context isolation. The main Sonnet decides wh
 | `batch` | Run several read-only tool calls concurrently in one turn | no |
 | `web_fetch` | Download a URL over http(s); HTML→text, paginates long pages | no |
 | `now` | Current time | no |
-| `explore(task)` | Delegate inspection to a Haiku-backed subagent | no |
-| `plan(task)` | Delegate hard reasoning to an Opus-backed subagent | no |
+| `explore(task)` | Delegate inspection to a gpt-oss-120b-backed subagent | no |
+| `plan(task)` | Delegate hard reasoning to a grok-4.3-backed subagent | no |
 
 `Glob` and `Grep` use the same names Claude Code uses, so the model recognises them immediately. `web_fetch` is a native Go tool (no external dependency, no API key) that downloads a URL, strips scripts/styles, decodes entities, and paginates long pages via `max_length` + `start_index`. Disable it with `-no-fetch`. There is no built-in `web_search`; use `web_fetch` against a known URL or pair the agent with `bash` + `curl`.
 
@@ -122,7 +124,7 @@ Two things make this fast and cheap:
 
 2. **Subagent context isolation.** When `explore` runs a 30-file investigation, all that searching and reading happens in the subagent's loop and dies with it. Only the textual summary returns to the main agent.
 
-When context fills up, run `/compact` (see below) — Haiku summarises older turns so you can keep going without starting over.
+When context fills up, run `/compact` (see below) — the summarizer (grok-4.3 by default; override with `GOCODE_SUMMARIZE_MODEL`) compresses older turns so you can keep going without starting over.
 
 ## Project memory
 
@@ -142,9 +144,9 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | Flag | Default | Description |
 |---|---|---|
 | `-dir` | cwd | Working directory the agent is sandboxed to (defaults to the directory you launched from) |
-| `-model` | `anthropic/claude-sonnet-4.6` | Main-agent model (any OpenRouter slug; env: `GOCODE_MODEL`) |
-| `-explore-model` | `anthropic/claude-haiku-4.5` | Model for the explore subagent (env: `GOCODE_EXPLORE_MODEL`) |
-| `-plan-model` | `anthropic/claude-opus-4.7` | Model for the plan subagent (env: `GOCODE_PLAN_MODEL`) |
+| `-model` | `x-ai/grok-4.3` | Main-agent model (any OpenRouter slug; env: `GOCODE_MODEL`) |
+| `-explore-model` | `openai/gpt-oss-120b` | Model for the explore subagent (env: `GOCODE_EXPLORE_MODEL`) |
+| `-plan-model` | `x-ai/grok-4.3` | Model for the plan subagent (env: `GOCODE_PLAN_MODEL`) |
 | `-no-subagents` | false | Disable the explore and plan tools |
 | `-no-fetch` | false | Disable the native `web_fetch` tool |
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |
@@ -188,25 +190,25 @@ It's the right thing to enable when something feels off and we want to look at w
 ```
 > what's the difference between Loop and StepStream?
 ```
-Sonnet answers directly using its read-only tools.
+The main agent answers directly using its read-only tools.
 
 **Investigation:**
 ```
 > find every place we read environment variables and summarise the patterns
 ```
-Sonnet should delegate this to `explore`. The Haiku subagent fans out greps via `batch`, reads candidate files, and returns a summary. Cheap.
+The main agent should delegate this to `explore`. The gpt-oss-120b subagent fans out greps via `batch`, reads candidate files, and returns a summary. Cheap.
 
 **Refactor:**
 ```
 > rename ToolFunc to ToolHandler everywhere, update tests, leave a deprecation alias
 ```
-Sonnet plans via `todo_write`, uses `str_replace_based_edit_tool` for edits, runs `go test ./...` via `bash` (you'll be prompted to approve).
+The main agent plans via `todo_write`, uses `str_replace_based_edit_tool` for edits, runs `go test ./...` via `bash` (you'll be prompted to approve).
 
 **Architecture decision:**
 ```
 > we want to add a per-session sqlite cache for file shas. design it.
 ```
-Sonnet should call `plan` to escalate to Opus for the design, then summarise back.
+The main agent should call `plan` to delegate the design, then summarise back.
 
 ## Things to watch the first time you run it
 
@@ -217,7 +219,7 @@ Sonnet should call `plan` to escalate to Opus for the design, then summarise bac
 ## What's not here yet
 
 - SHA-based file-content dedup (re-reads cost full tokens today)
-- Haiku-tier tool-result compression for oversized outputs
+- Cheap-tier tool-result compression for oversized outputs
 - Auto-compaction at a context-window threshold
 - Persistent codebase index across sessions
 - Speculative inspection while the model is drafting

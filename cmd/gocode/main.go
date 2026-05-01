@@ -2,16 +2,16 @@
 //
 // Topology (Phase 2):
 //
-//	main agent           (Sonnet by default — configurable via -model)
+//	main agent           (x-ai/grok-4.3 by default — configurable via -model)
 //	  ├── direct tools   workspace read-only + trained bash + trained editor
 //	  │                  + todo + clock + batch
-//	  ├── explore        subagent on Haiku (-explore-model) — workspace
-//	  │                  read-only + restricted bash + batch + clock.
+//	  ├── explore        subagent on openai/gpt-oss-120b (-explore-model) —
+//	  │                  workspace read-only + restricted bash + batch + clock.
 //	  │                  Used for cheap, parallelisable inspection; its
 //	  │                  iteration history never enters the main context.
-//	  └── plan           subagent on Opus (-plan-model) — read-only tools,
-//	                     no shell or edits. Used when the main agent wants
-//	                     a stronger reasoner for design or hard debugging.
+//	  └── plan           subagent on x-ai/grok-4.3 (-plan-model) — read-only
+//	                     tools, no shell or edits. Used when the main agent
+//	                     wants a focused reasoner for design or hard debugging.
 //
 // The batch tool is also offered to the main agent so it can run several
 // reads/searches concurrently in a single turn without paying for a
@@ -25,17 +25,17 @@
 // The agent is sandboxed to the current working directory by default.
 // Pass -dir to operate on a different directory.
 //
-// Models default to Anthropic Claude routes on OpenRouter
-// (anthropic/claude-sonnet-4.6, anthropic/claude-haiku-4.5,
-// anthropic/claude-opus-4.7). Override with -model / -explore-model /
-// -plan-model to use any OpenRouter-supported model id.
+// Models default to x-ai/grok-4.3 for the main agent and plan subagent,
+// and openai/gpt-oss-120b for the explore subagent. Override with
+// -model / -explore-model / -plan-model to use any OpenRouter-supported
+// model id.
 //
 // Flags:
 //
 //	-dir            working directory the agent is sandboxed to (default cwd)
-//	-model          main-agent model id (default Sonnet)
-//	-explore-model  model used for the explore subagent (default Haiku)
-//	-plan-model     model used for the plan subagent (default Opus)
+//	-model          main-agent model id (default x-ai/grok-4.3)
+//	-explore-model  model used for the explore subagent (default openai/gpt-oss-120b)
+//	-plan-model     model used for the plan subagent (default x-ai/grok-4.3)
 //	-no-subagents   disable the explore and plan subagent tools
 //	-bash           bash safety mode: restricted | standard | unrestricted
 //	-yes            auto-approve every confirmation prompt
@@ -122,9 +122,9 @@ Operating principles:
 
 func main() {
 	dir := flag.String("dir", ".", "working directory the agent is sandboxed to (defaults to the current directory)")
-	model := flag.String("model", envOr("GOCODE_MODEL", "anthropic/claude-sonnet-4.6"), "main-agent model id (any OpenRouter slug; env: GOCODE_MODEL)")
-	exploreModel := flag.String("explore-model", envOr("GOCODE_EXPLORE_MODEL", "anthropic/claude-haiku-4.5"), "model id for the explore subagent (env: GOCODE_EXPLORE_MODEL)")
-	planModel := flag.String("plan-model", envOr("GOCODE_PLAN_MODEL", "anthropic/claude-opus-4.7"), "model id for the plan subagent (env: GOCODE_PLAN_MODEL)")
+	model := flag.String("model", envOr("GOCODE_MODEL", "x-ai/grok-4.3"), "main-agent model id (any OpenRouter slug; env: GOCODE_MODEL)")
+	exploreModel := flag.String("explore-model", envOr("GOCODE_EXPLORE_MODEL", "openai/gpt-oss-120b"), "model id for the explore subagent (env: GOCODE_EXPLORE_MODEL)")
+	planModel := flag.String("plan-model", envOr("GOCODE_PLAN_MODEL", "x-ai/grok-4.3"), "model id for the plan subagent (env: GOCODE_PLAN_MODEL)")
 	noSubagents := flag.Bool("no-subagents", false, "disable explore and plan subagent tools")
 	noFetch := flag.Bool("no-fetch", false, "disable the native web_fetch tool")
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
@@ -301,9 +301,9 @@ func main() {
 		MaxIter: *maxIter,
 	}
 
-	// Summarizer for /compact runs on Haiku — cheap and plenty capable
-	// for transcript summarization. Independent of the user's main model.
-	summarizer := mainClient.WithModel(envOr("GOCODE_SUMMARIZE_MODEL", "anthropic/claude-haiku-4.5"))
+	// Summarizer for /compact defaults to grok-4.3 (the main-tier model);
+	// override via GOCODE_SUMMARIZE_MODEL to point it at a cheaper slug.
+	summarizer := mainClient.WithModel(envOr("GOCODE_SUMMARIZE_MODEL", "x-ai/grok-4.3"))
 
 	// --- run ---------------------------------------------------------------
 
