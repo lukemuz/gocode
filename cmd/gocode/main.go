@@ -20,7 +20,10 @@
 // Usage:
 //
 //	export OPENROUTER_API_KEY=sk-or-...
-//	go run ./cmd/gocode -dir . -bash standard
+//	cd ~/your-project && gocode
+//
+// The agent is sandboxed to the current working directory by default.
+// Pass -dir to operate on a different directory.
 //
 // Models default to Anthropic Claude routes on OpenRouter
 // (anthropic/claude-sonnet-4.6, anthropic/claude-haiku-4.5,
@@ -29,7 +32,7 @@
 //
 // Flags:
 //
-//	-dir            working directory the agent is sandboxed to
+//	-dir            working directory the agent is sandboxed to (default cwd)
 //	-model          main-agent model id (default Sonnet)
 //	-explore-model  model used for the explore subagent (default Haiku)
 //	-plan-model     model used for the plan subagent (default Opus)
@@ -118,7 +121,7 @@ Operating principles:
 4. Be honest about what you don't know.`
 
 func main() {
-	dir := flag.String("dir", ".", "working directory the agent is sandboxed to")
+	dir := flag.String("dir", ".", "working directory the agent is sandboxed to (defaults to the current directory)")
 	model := flag.String("model", envOr("GOCODE_MODEL", "anthropic/claude-sonnet-4.6"), "main-agent model id (any OpenRouter slug; env: GOCODE_MODEL)")
 	exploreModel := flag.String("explore-model", envOr("GOCODE_EXPLORE_MODEL", "anthropic/claude-haiku-4.5"), "model id for the explore subagent (env: GOCODE_EXPLORE_MODEL)")
 	planModel := flag.String("plan-model", envOr("GOCODE_PLAN_MODEL", "anthropic/claude-opus-4.7"), "model id for the plan subagent (env: GOCODE_PLAN_MODEL)")
@@ -437,12 +440,8 @@ func parseBashMode(s string) (bash.Mode, error) {
 }
 
 func absDir(dir string) (string, error) {
-	abs, err := os.Getwd()
-	if err != nil {
-		return dir, err
+	if dir == "" {
+		dir = "."
 	}
-	if dir == "." || dir == "" {
-		return abs, nil
-	}
-	return dir, nil
+	return filepath.Abs(dir)
 }

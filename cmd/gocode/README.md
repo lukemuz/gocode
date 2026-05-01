@@ -45,7 +45,7 @@ From the gocode checkout:
 
 ```bash
 go build -o bin/gocode ./cmd/gocode
-./bin/gocode -dir ~/your-project -log auto
+cd ~/your-project && /path/to/gocode/bin/gocode -log auto
 ```
 
 Or symlink it into your `PATH`:
@@ -56,19 +56,22 @@ sudo ln -s "$(pwd)/bin/gocode" /usr/local/bin/gocode
 
 ### Option C — `go run` (development only)
 
-Useful while editing gocode itself. From the repo root:
+Useful while editing gocode itself. From the project you want to work on:
 
 ```bash
-go run ./cmd/gocode -dir ~/your-project
+go run github.com/lukemuz/gocode/cmd/gocode
 ```
 
-Slow start every time (re-compiles), but no binary to manage.
+Slow start every time (re-compiles), but no binary to manage. Pass `-dir` if you'd rather invoke it from elsewhere.
 
 ### First-run sanity check
 
 ```bash
-gocode -dir . -log auto
+cd ~/your-project
+gocode -log auto
 ```
+
+The agent operates on the current working directory by default. Pass `-dir <path>` to point it elsewhere without changing shells.
 
 You should see:
 ```
@@ -138,7 +141,7 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 
 | Flag | Default | Description |
 |---|---|---|
-| `-dir` | `.` | Working directory the agent is sandboxed to |
+| `-dir` | cwd | Working directory the agent is sandboxed to (defaults to the directory you launched from) |
 | `-model` | `anthropic/claude-sonnet-4.6` | Main-agent model (any OpenRouter slug; env: `GOCODE_MODEL`) |
 | `-explore-model` | `anthropic/claude-haiku-4.5` | Model for the explore subagent (env: `GOCODE_EXPLORE_MODEL`) |
 | `-plan-model` | `anthropic/claude-opus-4.7` | Model for the plan subagent (env: `GOCODE_PLAN_MODEL`) |
