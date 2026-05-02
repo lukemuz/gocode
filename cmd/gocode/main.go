@@ -86,14 +86,14 @@ You operate inside a workspace directory. Available tools:
 - batch: run 2+ independent read-only calls in one turn. Default for independent reads/greps/inspections; skip only when a later call depends on an earlier result.
 - web_fetch (when available): download an http(s) URL and return its content as text. HTML is converted to a plain-text approximation; long pages paginate via max_length + start_index. Use this for documentation lookups and inspecting URLs from error messages.
 - explore (when available): delegate inspection to a faster, cheaper specialist that returns a summary
-- plan (when available): delegate hard reasoning or design questions to a stronger model
+- plan (when available): design and architecture specialist on a stronger model — get a structured plan before non-trivial multi-file edits, interface changes, or when stuck on a hypothesis
 - now: current time
 
 Operating principles:
 1. For broad inspection (understand a module, find all usages, audit a pattern), prefer the explore subagent — it's cheaper and its file dumps stay out of your context. You receive only its summary.
 2. For tight, surgical lookups (one file, one symbol), call read_file or Grep directly.
 3. Default to batch for independent read-only work. Each tool call is a full LLM round trip, so if you'd otherwise issue 2+ reads/greps/inspections that don't depend on each other, batch them. Issue solo calls only when a later call's input depends on an earlier call's output (e.g. grep first, then read only the files it returned).
-4. For genuinely hard reasoning (architecture, subtle bugs, debugging strategy), call plan and feed it the relevant context.
+4. Call plan as a routine first step for substantive design work — non-trivial multi-file changes, interface or data-shape changes, decisions with multiple plausible tradeoffs, or stuck debugging. Pass the question with the context you've gathered. Skip plan for routine single-file changes or when your approach is already clear.
 5. For multi-step tasks, call todo_write at the start and update it as you go. Keep at most one item in_progress.
 6. Be concise in chat. State what you're doing in one short sentence before tool calls; don't narrate every step.
 7. After making edits, verify your work with appropriate checks (build, type-check, run affected tests via bash) before declaring success. Don't trust an edit you haven't checked.
@@ -112,7 +112,7 @@ Operating principles:
 
 const planSystemPrompt = `You are gocode's plan specialist — a careful reasoner backed by a strong model.
 
-You receive a design or debugging question along with relevant context the orchestrator has gathered. You have read-only filesystem tools to verify specifics, but no shell and no edits.
+You receive a design, implementation-planning, or debugging question along with relevant context the orchestrator has gathered. You have read-only filesystem tools to verify specifics, but no shell and no edits.
 
 Operating principles:
 1. Think carefully. Cover trade-offs, edge cases, and likely failure modes.
@@ -230,7 +230,7 @@ func main() {
 		planClient := mainClient.WithModel(*planModel)
 		planBinding, err := subagent.New(subagent.Config{
 			Name:        "plan",
-			Description: "Delegate a hard reasoning task — architecture decision, subtle bug analysis, debugging strategy — to a stronger model. Pass the question PLUS the relevant context you have already gathered (file excerpts, error messages, prior attempts). The specialist returns a structured plan with numbered steps and risks. Use sparingly; it is expensive.",
+			Description: "Delegate design and architecture work to a stronger reasoning model (better at multi-step architectural reasoning and invariant tracking across components). Get a structured plan before editing when work touches 3+ files, changes a public interface or shared data shape, has multiple plausible tradeoffs, or you've spent 2+ debugging turns without a clear hypothesis. Pass the question PLUS context you've gathered (file excerpts, error messages, prior attempts). Returns a numbered plan with files to touch and risks. Skip for routine single-file changes or when your approach is already clear.",
 			Client:      planClient,
 			System:      planSystemPrompt,
 			Tools:       roTools.CacheLast(gocode.Ephemeral()),
