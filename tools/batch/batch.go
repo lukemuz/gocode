@@ -64,7 +64,7 @@ func New(cfg Config) gocode.ToolBinding {
 	}
 
 	desc := fmt.Sprintf(
-		"Run multiple read-only tool calls concurrently in a single turn. Use this to fan out reads, searches, and inspections — e.g. one Grep + several read_file + a list_directory in parallel. Each entry in 'calls' is dispatched independently and all results are returned together. Allowed tools: %s. Confirmation-gated tools (edits, shell) are NOT allowed and must be invoked directly.",
+		"Run 2+ independent read-only tool calls concurrently in one turn. Each direct tool call is a full LLM round trip; batch collapses N round trips into one and runs the underlying work in parallel. Default to batch whenever you have 2+ independent reads, searches, or inspections — e.g. one Grep + several read_file + a list_directory together. Don't batch when a later call's input depends on an earlier call's output (e.g. grep first, then read only the files it found). Allowed tools: %s. Confirmation-gated tools (edits, shell) are NOT allowed and must be invoked directly.",
 		strings.Join(allowed, ", "),
 	)
 
