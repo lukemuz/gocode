@@ -237,7 +237,7 @@ func main() {
 			Client:      exploreClient,
 			System:      exploreSystemPrompt,
 			Tools:       exploreTools,
-			MaxIter:     25,
+			MaxIter:     50,
 		})
 		if err != nil {
 			log.Fatal(err)
