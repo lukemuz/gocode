@@ -170,14 +170,42 @@ func isPlainUserMessage(msg Message) bool {
 }
 
 // estimateTokens provides a rough token count when no TokenCounter is
-// configured. Uses 4 characters per token as a widely-cited heuristic for
-// English prose; real counts will vary by language and model vocabulary.
+// configured.
+//
+// The heuristic is intentionally cheap: ~4 chars per token for prose
+// (Text, Content, Name, ToolUseID), ~3 chars per token for JSON-structured
+// blobs (Input and any opaque Raw payload — braces, quotes and commas
+// tokenize denser than English), plus a per-message and per-block envelope
+// charge so a long thread of tiny messages doesn't undercount. Real
+// per-provider counts will still vary; supply a TokenCounter for accuracy.
 func estimateTokens(msgs []Message) (int, error) {
-	var chars int
+	const (
+		// Each message has a role tag plus structural envelope on the wire.
+		// 4 tokens matches OpenAI's documented per-message overhead for chat
+		// completions and is close enough for Anthropic's shape too.
+		perMessage = 4
+		// Each content block has a type tag and surrounding structure.
+		perBlock = 2
+	)
+	var tokens int
 	for _, msg := range msgs {
+		tokens += perMessage
 		for _, b := range msg.Content {
-			chars += len(b.Text) + len(b.Content) + len(b.Input)
+			tokens += perBlock
+			tokens += charsToTokens(b.Text, 4)
+			tokens += charsToTokens(b.Content, 4)
+			tokens += charsToTokens(b.Name, 4)
+			tokens += charsToTokens(b.ToolUseID, 4)
+			tokens += charsToTokens(string(b.Input), 3)
+			tokens += charsToTokens(string(b.Raw), 3)
 		}
 	}
-	return max(0, chars/4), nil
+	return tokens, nil
+}
+
+func charsToTokens(s string, charsPerToken int) int {
+	if s == "" {
+		return 0
+	}
+	return len(s) / charsPerToken
 }
