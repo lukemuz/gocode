@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -312,22 +313,61 @@ func TestIsPlainUserMessage(t *testing.T) {
 }
 
 func TestEstimateTokens(t *testing.T) {
-	msgs := []Message{
-		NewUserMessage("hello world"), // 11 chars = ~2 tokens
-	}
-	count, err := estimateTokens(msgs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count < 1 {
-		t.Errorf("expected at least 1 token, got %d", count)
-	}
+	t.Run("plain user message", func(t *testing.T) {
+		// "hello world" = 11 chars / 4 = 2 prose tokens, +4 message envelope,
+		// +2 block envelope = 8 tokens.
+		got, err := estimateTokens([]Message{NewUserMessage("hello world")})
+		if err != nil || got != 8 {
+			t.Fatalf("got %d err=%v, want 8", got, err)
+		}
+	})
 
-	// Empty history should return 0, not error.
-	count, err = estimateTokens(nil)
-	if err != nil || count != 0 {
-		t.Errorf("empty msgs: count=%d err=%v", count, err)
-	}
+	t.Run("empty history is zero", func(t *testing.T) {
+		got, err := estimateTokens(nil)
+		if err != nil || got != 0 {
+			t.Fatalf("got %d err=%v, want 0", got, err)
+		}
+	})
+
+	t.Run("per-message overhead dominates for tiny turns", func(t *testing.T) {
+		// Without per-message overhead, a thread of empty messages would be
+		// counted as zero tokens. The new heuristic charges 4 per message.
+		msgs := []Message{NewUserMessage(""), NewUserMessage(""), NewUserMessage("")}
+		got, err := estimateTokens(msgs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got < 3*4 {
+			t.Errorf("expected at least %d tokens for 3 empty messages, got %d", 3*4, got)
+		}
+	})
+
+	t.Run("tool_use input counts denser than prose", func(t *testing.T) {
+		// 12-byte JSON input vs a 12-byte prose text: input should cost more
+		// because JSON tokenizes denser (3 chars/token vs 4).
+		toolUse := Message{Role: RoleAssistant, Content: []ContentBlock{
+			{Type: TypeToolUse, ID: "x", Name: "ls", Input: json.RawMessage(`{"x":"yyyyy"}`)},
+		}}
+		prose := Message{Role: RoleAssistant, Content: []ContentBlock{
+			{Type: TypeText, Text: "hello world!"}, // 12 bytes
+		}}
+		toolTokens, _ := estimateTokens([]Message{toolUse})
+		proseTokens, _ := estimateTokens([]Message{prose})
+		if toolTokens <= proseTokens {
+			t.Errorf("expected tool_use (denser JSON) to outweigh equal-length prose; got tool=%d prose=%d", toolTokens, proseTokens)
+		}
+	})
+
+	t.Run("tool_result content is counted", func(t *testing.T) {
+		got, err := estimateTokens([]Message{toolResultMsg("tu1", strings.Repeat("a", 40))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 40 chars / 4 = 10 prose tokens + 4 message + 2 block + tu1 (3/4=0) = 16.
+		if got != 16 {
+			t.Errorf("got %d, want 16", got)
+		}
+	})
 }
 
 // textContent is a test helper that extracts text from a message.
