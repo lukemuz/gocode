@@ -393,7 +393,9 @@ func makeConfirmer(autoYes bool) func(ctx context.Context, b gocode.ToolBinding,
 			return true, nil
 		}
 		fmt.Fprintf(os.Stderr, "\n[approve %s]\n", b.Tool.Name)
-		if compact := compactJSON(input); compact != "" {
+		if preview, ok := renderEditPreview(b.Tool.Name, input); ok {
+			fmt.Fprint(os.Stderr, preview)
+		} else if compact := compactJSON(input); compact != "" {
 			fmt.Fprintf(os.Stderr, "  input: %s\n", compact)
 		}
 		fmt.Fprint(os.Stderr, "  approve? [y/N] ")
