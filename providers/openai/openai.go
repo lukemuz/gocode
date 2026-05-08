@@ -24,23 +24,36 @@ const (
 // ---------------------------------------------------------------------------
 
 // openAIChatRequest is the JSON body for OpenAI-compatible chat completions.
+//
+// Tools is []json.RawMessage rather than []openAIToolDef so backends that host
+// non-function tools (OpenRouter's "openrouter:web_search", etc.) can splice
+// opaque entries alongside function-call tool definitions. toOpenAITools
+// renders each function tool to JSON itself and concatenates with any
+// allowed ProviderTool.Raw bodies.
 type openAIChatRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
-	Messages  []openAIMessage `json:"messages"`
-	Tools     []openAIToolDef `json:"tools,omitempty"`
-	Stream    bool            `json:"stream,omitempty"`
+	Model     string            `json:"model"`
+	MaxTokens int               `json:"max_tokens,omitempty"`
+	Messages  []openAIMessage   `json:"messages"`
+	Tools     []json.RawMessage `json:"tools,omitempty"`
+	Stream    bool              `json:"stream,omitempty"`
 }
 
 // openAIMessage is a wire message. Content is `any` so request paths can
 // emit either a plain string or a typed-parts array (used to attach
 // cache_control on cache-aware backends like OpenRouter); response paths
 // receive a string and use messageContentString to coerce.
+//
+// Annotations is the raw annotations array some backends attach to assistant
+// messages (e.g. OpenRouter url_citation entries returned alongside hosted
+// web_search results). It is captured opaquely; fromOpenAIResponse turns
+// each entry into an opaque gocode.ContentBlock so callers can render
+// citations without the library taking a dependency on a specific shape.
 type openAIMessage struct {
-	Role       string           `json:"role"`
-	Content    any              `json:"content,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	Role        string            `json:"role"`
+	Content     any               `json:"content,omitempty"`
+	ToolCallID  string            `json:"tool_call_id,omitempty"`
+	ToolCalls   []openAIToolCall  `json:"tool_calls,omitempty"`
+	Annotations []json.RawMessage `json:"annotations,omitempty"`
 }
 
 // openAIContentPart is one element in the array form of openAIMessage.Content.
@@ -231,26 +244,34 @@ func wireTextContent(text string, cache *gocode.CacheControl, cacheCompatible bo
 	return []openAIContentPart{{Type: "text", Text: text, CacheControl: cache}}
 }
 
-// toOpenAITools converts canonical Tools to OpenAI function-calling format.
-// Provider-tagged tools (category 2 — Anthropic-only declaration shapes) and
-// any ProviderTools (category 1 — server-executed) are rejected: the Chat
-// Completions endpoint does not expose hosted tools, and provider-defined
-// declaration shapes cannot be translated faithfully. Callers who want
-// OpenAI-hosted tools (web_search, file_search, code_interpreter) need a
-// Responses-API provider, not Chat Completions.
+// toOpenAITools converts canonical Tools to OpenAI function-calling format
+// and (when allowProviderTools=true) splices any ProviderTool.Raw bodies as
+// opaque entries in the resulting tools array.
+//
+// Provider-tagged tools (category 2 — Anthropic-only declaration shapes) are
+// rejected unconditionally: those wire shapes are not translatable to Chat
+// Completions.
+//
+// ProviderTools (category 1 — server-executed) are rejected when
+// allowProviderTools=false. Stock OpenAI Chat Completions does not expose
+// hosted tools — callers who want OpenAI-hosted tools (web_search,
+// file_search, code_interpreter) need a Responses-API provider. OpenRouter,
+// despite speaking the same wire format, *does* host tools at this endpoint
+// (e.g. "openrouter:web_search"), so its Provider passes allowProviderTools
+// =true.
 //
 // cacheCompatible controls whether Tool.CacheControl markers are emitted as
 // a sibling cache_control field on the wire. False for stock OpenAI; true
 // for OpenRouter, which routes the marker to Anthropic backends.
-func toOpenAITools(tools []gocode.Tool, providerTools []gocode.ProviderTool, cacheCompatible bool) ([]openAIToolDef, error) {
-	if len(providerTools) > 0 {
+func toOpenAITools(tools []gocode.Tool, providerTools []gocode.ProviderTool, cacheCompatible, allowProviderTools bool) ([]json.RawMessage, error) {
+	if len(providerTools) > 0 && !allowProviderTools {
 		return nil, fmt.Errorf("gocode: openai (chat completions) does not support ProviderTools; use a Responses-API provider")
 	}
-	if len(tools) == 0 {
+	if len(tools) == 0 && len(providerTools) == 0 {
 		return nil, nil
 	}
-	out := make([]openAIToolDef, len(tools))
-	for i, t := range tools {
+	out := make([]json.RawMessage, 0, len(tools)+len(providerTools))
+	for _, t := range tools {
 		if t.Provider != "" && t.Provider != "openai" {
 			return nil, fmt.Errorf("gocode: openai: tool %q is tagged for provider %q", t.Name, t.Provider)
 		}
@@ -262,7 +283,17 @@ func toOpenAITools(tools []gocode.Tool, providerTools []gocode.ProviderTool, cac
 		if cacheCompatible {
 			td.CacheControl = t.CacheControl
 		}
-		out[i] = td
+		raw, err := json.Marshal(td)
+		if err != nil {
+			return nil, fmt.Errorf("gocode: marshal openai tool %q: %w", t.Name, err)
+		}
+		out = append(out, raw)
+	}
+	for _, pt := range providerTools {
+		if len(pt.Raw) == 0 {
+			return nil, fmt.Errorf("gocode: openai: provider tool tagged %q has empty Raw body", pt.Provider)
+		}
+		out = append(out, pt.Raw)
 	}
 	return out, nil
 }
@@ -294,6 +325,19 @@ func fromOpenAIResponse(r openAIChatResponse) gocode.ProviderResponse {
 		content = append(content, gocode.ContentBlock{
 			Type: gocode.TypeText,
 			Text: text,
+		})
+	}
+
+	for _, ann := range choice.Message.Annotations {
+		var head struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(ann, &head); err != nil || head.Type == "" {
+			continue
+		}
+		content = append(content, gocode.ContentBlock{
+			Type: head.Type,
+			Raw:  append(json.RawMessage(nil), ann...),
 		})
 	}
 
@@ -370,15 +414,16 @@ func NewClientFromEnv(model string) (*gocode.Client, error) {
 
 // Call implements gocode.Provider for OpenAI Chat Completions. Cache markers
 // in canonical types are dropped because OpenAI auto-caches and may validate
-// strictly against unknown fields.
+// strictly against unknown fields. ProviderTools are rejected: stock OpenAI
+// hosts tools only via the Responses API.
 func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode.ProviderResponse, error) {
-	return CompatibleCall(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, false)
+	return CompatibleCall(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, false, false)
 }
 
 // Stream implements gocode.Provider.Stream by delegating to the shared
 // streaming helper (mirrors the Call pattern).
 func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDelta func(gocode.ContentBlock)) (gocode.ProviderResponse, error) {
-	return CompatibleStream(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, onDelta, false)
+	return CompatibleStream(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, onDelta, false, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -388,7 +433,9 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 // CompatibleCall marshals req into an OpenAI chat completions body, POSTs it
 // to url with the given Bearer key, and decodes the response. cacheCompatible
 // controls whether cache_control markers are emitted (OpenRouter) or dropped
-// (stock OpenAI).
+// (stock OpenAI). allowProviderTools=true permits ProviderTool entries to be
+// spliced into the wire tools array (used by OpenRouter for hosted tools
+// like "openrouter:web_search"); stock OpenAI passes false.
 func CompatibleCall(
 	ctx context.Context,
 	httpClient *http.Client,
@@ -396,8 +443,9 @@ func CompatibleCall(
 	url string,
 	req gocode.ProviderRequest,
 	cacheCompatible bool,
+	allowProviderTools bool,
 ) (gocode.ProviderResponse, error) {
-	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible)
+	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible, allowProviderTools)
 	if err != nil {
 		return gocode.ProviderResponse{}, err
 	}
@@ -461,8 +509,9 @@ func CompatibleStream(
 	req gocode.ProviderRequest,
 	onDelta func(gocode.ContentBlock),
 	cacheCompatible bool,
+	allowProviderTools bool,
 ) (gocode.ProviderResponse, error) {
-	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible)
+	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible, allowProviderTools)
 	if err != nil {
 		return gocode.ProviderResponse{}, err
 	}

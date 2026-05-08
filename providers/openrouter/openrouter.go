@@ -71,7 +71,14 @@ func NewClientFromEnv(model string) (*gocode.Client, error) {
 // through to Anthropic backends, ignored by OpenAI backends), so we emit
 // the typed-parts content shape and tool cache_control field whenever the
 // canonical types carry them.
+//
+// allowProviderTools=true: OpenRouter hosts tools server-side at this same
+// endpoint (e.g. WebSearch — "openrouter:web_search"); ProviderTool entries
+// are spliced verbatim into the wire tools array.
 func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode.ProviderResponse, error) {
+	if err := validateProviderTools(req.ProviderTools); err != nil {
+		return gocode.ProviderResponse{}, err
+	}
 	return openai.CompatibleCall(
 		ctx,
 		p.cfg.HTTPClient,
@@ -79,12 +86,16 @@ func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode
 		p.cfg.BaseURL+"/api/v1/chat/completions",
 		req,
 		true,
+		true,
 	)
 }
 
 // Stream implements gocode.Provider.Stream for OpenRouter by delegating to
 // the shared streaming helper (mirrors the Call pattern).
 func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDelta func(gocode.ContentBlock)) (gocode.ProviderResponse, error) {
+	if err := validateProviderTools(req.ProviderTools); err != nil {
+		return gocode.ProviderResponse{}, err
+	}
 	return openai.CompatibleStream(
 		ctx,
 		p.cfg.HTTPClient,
@@ -93,5 +104,19 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 		req,
 		onDelta,
 		true,
+		true,
 	)
+}
+
+// validateProviderTools rejects ProviderTool entries tagged for a different
+// provider. Mirrors what AnthropicProvider does for its own tools — surfaces
+// misuse loudly at request build time rather than dispatching a malformed
+// request.
+func validateProviderTools(pts []gocode.ProviderTool) error {
+	for _, pt := range pts {
+		if pt.Provider != ProviderTag {
+			return fmt.Errorf("gocode: openrouter: provider tool tagged %q cannot be used with this provider", pt.Provider)
+		}
+	}
+	return nil
 }

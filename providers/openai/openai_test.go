@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,5 +128,122 @@ func TestCompatibleStream(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestToOpenAIToolsRejectsProviderToolsByDefault(t *testing.T) {
+	pt := gocode.ProviderTool{Provider: "openrouter", Raw: json.RawMessage(`{"type":"openrouter:web_search"}`)}
+	_, err := toOpenAITools(nil, []gocode.ProviderTool{pt}, false, false)
+	if err == nil {
+		t.Fatal("expected error when allowProviderTools=false, got nil")
+	}
+	if !strings.Contains(err.Error(), "use a Responses-API provider") {
+		t.Errorf("error message changed; expected the existing 'use a Responses-API provider' guidance, got %q", err.Error())
+	}
+}
+
+func TestToOpenAIToolsSplicesProviderToolsWhenAllowed(t *testing.T) {
+	fn := gocode.NewTool("calc", "do math",
+		gocode.Object(gocode.Number("a", "v", gocode.Required())))
+	pt := gocode.ProviderTool{
+		Provider: "openrouter",
+		Raw:      json.RawMessage(`{"type":"openrouter:web_search","parameters":{"max_results":3}}`),
+	}
+
+	out, err := toOpenAITools([]gocode.Tool{fn}, []gocode.ProviderTool{pt}, false, true)
+	if err != nil {
+		t.Fatalf("toOpenAITools: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want 2", len(out))
+	}
+
+	var first map[string]any
+	if err := json.Unmarshal(out[0], &first); err != nil {
+		t.Fatalf("decode first tool: %v", err)
+	}
+	if first["type"] != "function" {
+		t.Errorf("first tool type = %v, want function", first["type"])
+	}
+
+	var second map[string]any
+	if err := json.Unmarshal(out[1], &second); err != nil {
+		t.Fatalf("decode second tool: %v", err)
+	}
+	if second["type"] != "openrouter:web_search" {
+		t.Errorf("second tool type = %v, want openrouter:web_search", second["type"])
+	}
+	params, ok := second["parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("parameters not preserved: %v", second)
+	}
+	if params["max_results"].(float64) != 3 {
+		t.Errorf("max_results = %v, want 3", params["max_results"])
+	}
+}
+
+func TestProviderRejectsProviderToolsAtChatCompletions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be reached when ProviderTools are rejected")
+	}))
+	defer srv.Close()
+
+	p := &Provider{cfg: Config{APIKey: "test", BaseURL: srv.URL, HTTPClient: srv.Client()}}
+	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+		Model:    "gpt-4o-mini",
+		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		ProviderTools: []gocode.ProviderTool{{
+			Provider: "openrouter",
+			Raw:      json.RawMessage(`{"type":"openrouter:web_search"}`),
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected error from Provider.Call with ProviderTools, got nil")
+	}
+	if !strings.Contains(err.Error(), "Responses-API") {
+		t.Errorf("error message changed: %q", err.Error())
+	}
+}
+
+func TestFromOpenAIResponseSurfacesAnnotations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Discard the request body — we're testing response decoding only.
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{
+				"message":{
+					"role":"assistant",
+					"content":"Go was released in 2009.",
+					"annotations":[
+						{"type":"url_citation","url_citation":{"url":"https://go.dev","title":"Go","start_index":0,"end_index":2}}
+					]
+				},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1}
+		}`))
+	}))
+	defer srv.Close()
+
+	p := &Provider{cfg: Config{APIKey: "test", BaseURL: srv.URL, HTTPClient: srv.Client()}}
+	resp, err := p.Call(context.Background(), gocode.ProviderRequest{
+		Model:    "openai/anything",
+		Messages: []gocode.Message{gocode.NewUserMessage("when was go released?")},
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if len(resp.Content) != 2 {
+		t.Fatalf("got %d content blocks, want 2 (text + url_citation): %+v", len(resp.Content), resp.Content)
+	}
+	if resp.Content[0].Type != gocode.TypeText {
+		t.Errorf("first block type = %q, want text", resp.Content[0].Type)
+	}
+	if resp.Content[1].Type != "url_citation" {
+		t.Errorf("second block type = %q, want url_citation", resp.Content[1].Type)
+	}
+	if len(resp.Content[1].Raw) == 0 {
+		t.Errorf("url_citation block missing Raw payload")
 	}
 }
