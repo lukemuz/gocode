@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.1.1 — 2026-05-08
+
+### Added
+
+- `providers/openrouter` now supports OpenRouter's hosted server-side tools.
+  `openrouter.WebSearch(opts)` constructs a `gocode.ProviderTool` for the
+  `openrouter:web_search` hosted tool; the model decides when to invoke and
+  OpenRouter executes the search server-side.
+- `openrouter.ProviderTag` constant ("openrouter") for tagging hosted tools;
+  the OpenRouter provider now rejects `ProviderTool` entries tagged for
+  other providers at request build time.
+- Citation surfacing on OpenAI-compatible `Call`: when a backend (e.g.
+  OpenRouter web search) attaches `annotations` to the assistant message,
+  each entry is emitted as an opaque `gocode.ContentBlock` (Type set from
+  the annotation's `type`, full JSON in `Raw`). Streaming citations are
+  not yet surfaced.
+
+### Changed
+
+- `openai.CompatibleCall` and `openai.CompatibleStream` gained a final
+  `allowProviderTools bool` parameter. Stock OpenAI passes `false` (Chat
+  Completions does not host tools); OpenRouter passes `true`. External
+  callers of these helpers will need to add the new argument.
+- `toOpenAITools` now returns `[]json.RawMessage` so opaque hosted-tool
+  entries can be spliced alongside function tools.
+
 ## v0.1.0 — 2026-05-08
 
 First tagged release. The library and CLI ship together under a single

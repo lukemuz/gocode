@@ -80,7 +80,7 @@ import (
 // version is the build-time version of the gocode CLI. The default tracks
 // the most recent tagged release; release builds can override it with
 // `go build -ldflags "-X main.version=vX.Y.Z"`.
-var version = "v0.1.0"
+var version = "v0.1.1"
 
 const mainSystemPrompt = `You are gocode, a fast and economical CLI coding assistant built on the gocode toolkit.
 
