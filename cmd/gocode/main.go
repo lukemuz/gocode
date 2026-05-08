@@ -40,6 +40,7 @@
 //	-bash           bash safety mode: restricted | standard | unrestricted
 //	-yes            auto-approve every confirmation prompt
 //	-max-iter       max model calls per turn (default 30)
+//	-version        print version and exit
 //
 // REPL commands:
 //
@@ -75,6 +76,11 @@ import (
 	"github.com/lukemuz/gocode/tools/web"
 	"github.com/lukemuz/gocode/tools/workspace"
 )
+
+// version is the build-time version of the gocode CLI. The default tracks
+// the most recent tagged release; release builds can override it with
+// `go build -ldflags "-X main.version=vX.Y.Z"`.
+var version = "v0.1.0"
 
 const mainSystemPrompt = `You are gocode, a fast and economical CLI coding assistant built on the gocode toolkit.
 
@@ -135,7 +141,13 @@ func main() {
 	autoYes := flag.Bool("yes", false, "auto-approve every confirmation prompt")
 	maxIter := flag.Int("max-iter", 30, "max model calls per turn")
 	logPath := flag.String("log", "", "JSONL session log path. Pass `auto` to write under ~/.config/gocode/sessions/")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
