@@ -5,7 +5,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 )
+
+// imageSink collects image attachments produced during a single tool call.
+// The agent loop installs a fresh sink in ctx via withImageSink before
+// invoking each tool, then drains it onto the resulting ToolResult.
+type imageSink struct {
+	mu     sync.Mutex
+	images []ImageBlock
+}
+
+type imageSinkKey struct{}
+
+func withImageSink(ctx context.Context) (context.Context, *imageSink) {
+	s := &imageSink{}
+	return context.WithValue(ctx, imageSinkKey{}, s), s
+}
+
+func (s *imageSink) drain() []ImageBlock {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.images
+	s.images = nil
+	return out
+}
+
+// AttachImage attaches an image to the current tool call's result. It is
+// the mechanism by which a ToolFunc — whose return type is just a string
+// — can ride image bytes back to the model alongside its textual output.
+//
+// Pass a base64 data URI ("data:image/png;base64,...") for portability;
+// remote http URLs are accepted but not all backends will fetch them.
+//
+// AttachImage is a no-op when called outside the agent loop (e.g. in a
+// unit test that invokes a ToolFunc directly with a vanilla context).
+func AttachImage(ctx context.Context, img ImageBlock) {
+	s, _ := ctx.Value(imageSinkKey{}).(*imageSink)
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.images = append(s.images, img)
+	s.mu.Unlock()
+}
+
+// WithImageSink installs a fresh image sink on parent and returns the
+// derived context plus a drain function that yields (and clears) any
+// images attached during the call. This is a testing aid: image-emitting
+// ToolFuncs can be exercised without standing up a full Loop. The agent
+// loop installs an equivalent sink implicitly per tool dispatch.
+func WithImageSink(parent context.Context) (context.Context, func() []ImageBlock) {
+	ctx, sink := withImageSink(parent)
+	return ctx, sink.drain
+}
 
 // ToolFunc is the signature every tool implementation must satisfy.
 // input is the raw JSON the model produced as arguments for this call.
@@ -357,6 +410,13 @@ type ToolResult struct {
 	ToolUseID string // matches ContentBlock.ID from the corresponding tool_use block
 	Content   string // the string returned by ToolFunc, or the error message
 	IsError   bool
+
+	// Images, if non-empty, are image attachments produced by the tool.
+	// The agent loop populates this from any AttachImage calls a tool
+	// made during its run. NewToolResultMessage flattens them onto the
+	// canonical user-role message; the OpenAI wire serializer emits them
+	// as image_url parts on a sibling user message.
+	Images []ImageBlock
 }
 
 // ToolUse is extracted from an assistant ContentBlock and passed to dispatch.

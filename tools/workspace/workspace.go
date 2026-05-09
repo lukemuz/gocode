@@ -11,10 +11,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -311,7 +313,10 @@ func (w *Workspace) buildBindings() []gocode.ToolBinding {
 	readFileTool := gocode.NewTool(
 		"read_file",
 		"Reads the contents of a file. Respects MaxFileBytes. "+
-			"Optionally restricts output to a line range (1-indexed, inclusive).",
+			"Optionally restricts output to a line range (1-indexed, inclusive). "+
+			"When the file is an image (png, jpeg, gif, webp, bmp, tiff), the text payload "+
+			"is a one-line metadata summary and the image bytes are attached to the result "+
+			"so the model receives them as visual content.",
 		gocode.Object(
 			gocode.String("path", "File path relative to the workspace root.", gocode.Required()),
 			gocode.Integer("start_line", "First line to include (1-indexed). 0 or omitted means start of file."),
@@ -669,7 +674,7 @@ func matchSegments(pat, p []string) bool {
 	return matchSegments(pat[1:], p[1:])
 }
 
-func (w *Workspace) readFile(_ context.Context, in readFileInput) (string, error) {
+func (w *Workspace) readFile(ctx context.Context, in readFileInput) (string, error) {
 	if in.Path == "" {
 		return "", fmt.Errorf("read_file: path is required")
 	}
@@ -694,6 +699,19 @@ func (w *Workspace) readFile(_ context.Context, in readFileInput) (string, error
 		if int64(len(data)) > w.maxFileBytes {
 			data = data[:w.maxFileBytes]
 			truncated = fmt.Sprintf("\n[truncated: file exceeds %d bytes]", w.maxFileBytes)
+		}
+		if mime := detectImageMIME(data, abs); mime != "" {
+			// Image bytes can't be safely truncated — a chopped data URI
+			// decodes to a corrupt image. Bail rather than mislead the
+			// model with a partial attachment.
+			if truncated != "" {
+				return "", fmt.Errorf("read_file: image %q exceeds %d byte cap", in.Path, w.maxFileBytes)
+			}
+			gocode.AttachImage(ctx, gocode.ImageBlock{
+				Source:    "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data),
+				MediaType: mime,
+			})
+			return fmt.Sprintf("image: %s (%s, %d B)", w.relPath(abs), mime, len(data)), nil
 		}
 		return string(data) + truncated, nil
 	}
@@ -729,6 +747,45 @@ func (w *Workspace) readFile(_ context.Context, in readFileInput) (string, error
 		return "", fmt.Errorf("read_file: %w", err)
 	}
 	return sb.String(), nil
+}
+
+// imageExtMIME maps the extensions read_file recognises as images to their
+// canonical IANA media types. Keep this aligned with the extension entries
+// in binaryExts so the Grep skipper and the read_file image detector
+// agree on what counts as an image.
+var imageExtMIME = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".bmp":  "image/bmp",
+	".tiff": "image/tiff",
+}
+
+// detectImageMIME returns a non-empty media type when data looks like an
+// image. It sniffs the leading bytes via http.DetectContentType first
+// (catches PNG/JPEG/GIF/WEBP/BMP regardless of extension), then falls back
+// to the file extension for formats DetectContentType is conservative about.
+func detectImageMIME(data []byte, path string) string {
+	sniffLen := len(data)
+	if sniffLen > 512 {
+		sniffLen = 512
+	}
+	ct := http.DetectContentType(data[:sniffLen])
+	// http.DetectContentType returns the media type with optional
+	// "; charset=..." for text — we only care about image/* here.
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = ct[:i]
+	}
+	ct = strings.TrimSpace(ct)
+	if strings.HasPrefix(ct, "image/") {
+		return ct
+	}
+	if mime, ok := imageExtMIME[strings.ToLower(filepath.Ext(path))]; ok {
+		return mime
+	}
+	return ""
 }
 
 type fileInfoResult struct {

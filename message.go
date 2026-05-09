@@ -17,6 +17,7 @@ const (
 	TypeText       = "text"
 	TypeToolUse    = "tool_use"
 	TypeToolResult = "tool_result"
+	TypeImage      = "image"
 )
 
 // ContentBlock is one element in a message's content array.
@@ -39,6 +40,14 @@ type ContentBlock struct {
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
 
+	// Image fields. Populated when Type=="image". Source is either a
+	// base64 data URI ("data:image/png;base64,...") or an http(s) URL;
+	// MediaType is the IANA media type ("image/png", "image/jpeg", ...).
+	// Caller is responsible for pre-encoding bytes; gocode does not
+	// downsample or re-encode.
+	Source    string `json:"source,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+
 	// CacheControl, if set, marks this block as a cache breakpoint. Caching
 	// is cumulative — see the CacheControl docs. Currently honored by
 	// AnthropicProvider and OpenRouterProvider; ignored by other providers.
@@ -55,7 +64,7 @@ type ContentBlock struct {
 // is captured opaquely into Raw and round-tripped verbatim.
 func isKnownBlockType(t string) bool {
 	switch t {
-	case TypeText, TypeToolUse, TypeToolResult:
+	case TypeText, TypeToolUse, TypeToolResult, TypeImage:
 		return true
 	}
 	return false
@@ -108,18 +117,56 @@ func NewUserMessage(text string) Message {
 	}
 }
 
+// ImageBlock is the caller-facing representation of an image attachment.
+// Source is either a base64 data URI ("data:image/png;base64,...") or an
+// http(s) URL; MediaType is the IANA media type ("image/png", ...).
+type ImageBlock struct {
+	Source    string
+	MediaType string
+}
+
+// NewUserMessageWithImages builds a user-role turn carrying a text block
+// followed by one image content block per image. Pass an empty text to
+// emit an image-only turn (the leading text block is skipped).
+func NewUserMessageWithImages(text string, images []ImageBlock) Message {
+	content := make([]ContentBlock, 0, len(images)+1)
+	if text != "" {
+		content = append(content, ContentBlock{Type: TypeText, Text: text})
+	}
+	for _, img := range images {
+		content = append(content, ContentBlock{
+			Type:      TypeImage,
+			Source:    img.Source,
+			MediaType: img.MediaType,
+		})
+	}
+	return Message{Role: RoleUser, Content: content}
+}
+
 // NewToolResultMessage builds the user-role turn that returns tool outputs
-// to the model after a tool_use response.
+// to the model after a tool_use response. Image attachments collected on
+// any ToolResult are flattened onto the same canonical message after the
+// tool_result blocks; the wire serializer splits them into a sibling
+// role="user" message when sending.
 func NewToolResultMessage(results []ToolResult) Message {
-	blocks := make([]ContentBlock, len(results))
-	for i, r := range results {
-		blocks[i] = ContentBlock{
+	blocks := make([]ContentBlock, 0, len(results))
+	var images []ContentBlock
+	for _, r := range results {
+		blocks = append(blocks, ContentBlock{
 			Type:      TypeToolResult,
 			ToolUseID: r.ToolUseID,
 			Content:   r.Content,
 			IsError:   r.IsError,
+		})
+		for _, img := range r.Images {
+			images = append(images, ContentBlock{
+				Type:      TypeImage,
+				Source:    img.Source,
+				MediaType: img.MediaType,
+			})
 		}
 	}
+	blocks = append(blocks, images...)
 	return Message{Role: RoleUser, Content: blocks}
 }
 

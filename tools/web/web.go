@@ -11,6 +11,7 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -92,7 +93,7 @@ func (f *Fetcher) Toolset() gocode.Toolset {
 		},
 		Required: []string{"url"},
 	}
-	desc := "Fetch a URL over http(s) and return its content as text. HTML is converted to a plain-text approximation (script/style stripped, entities decoded, whitespace collapsed). Long pages are paginated via max_length + start_index. Set raw=true for non-HTML content (JSON, plaintext, etc.)."
+	desc := "Fetch a URL over http(s) and return its content as text. HTML is converted to a plain-text approximation (script/style stripped, entities decoded, whitespace collapsed). Long pages are paginated via max_length + start_index. Set raw=true for non-HTML content (JSON, plaintext, etc.). When the response is an image (image/* content type), the text payload is a one-line metadata summary and the image bytes are attached to the result so the model receives them as visual content."
 	tool, fn := gocode.NewTypedTool("web_fetch", desc, schema, f.handle)
 	return gocode.Tools(gocode.ToolBinding{Tool: tool, Func: fn, Meta: gocode.ToolMetadata{RequiresConfirmation: false}})
 }
@@ -145,11 +146,30 @@ func (f *Fetcher) handle(ctx context.Context, in fetchInput) (string, error) {
 		return "", fmt.Errorf("web_fetch: read body: %w", err)
 	}
 	truncated := int64(len(body)) > f.maxBody
+
+	contentType := resp.Header.Get("Content-Type")
+	if mime := imageMIME(contentType, body); mime != "" && !in.Raw {
+		// Image bytes can't be safely truncated mid-stream; bail rather
+		// than emit a corrupt data URI.
+		if truncated {
+			return "", fmt.Errorf("web_fetch: image %s exceeds %d byte cap", u.String(), f.maxBody)
+		}
+		gocode.AttachImage(ctx, gocode.ImageBlock{
+			Source:    "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(body),
+			MediaType: mime,
+		})
+		header := fmt.Sprintf("URL: %s\nStatus: %d %s\nContent-Type: %s\nBytes-fetched: %d", u.String(), resp.StatusCode, http.StatusText(resp.StatusCode), contentType, len(body))
+		summary := fmt.Sprintf("image: %s (%d B)", mime, len(body))
+		if resp.StatusCode >= 400 {
+			return "", fmt.Errorf("%s\n\n%s", header, summary)
+		}
+		return header + "\n\n" + summary, nil
+	}
+
 	if truncated {
 		body = body[:f.maxBody]
 	}
 
-	contentType := resp.Header.Get("Content-Type")
 	var text string
 	if in.Raw || !looksHTML(contentType, body) {
 		text = string(body)
@@ -182,6 +202,33 @@ func (f *Fetcher) handle(ctx context.Context, in fetchInput) (string, error) {
 		return "", fmt.Errorf("%s\n\n%s", header, slice)
 	}
 	return header + "\n\n" + slice, nil
+}
+
+// imageMIME returns the canonical image media type for a response, or ""
+// if it doesn't look like an image. Header takes precedence; falls back
+// to sniffing the body via http.DetectContentType so servers that omit or
+// misreport Content-Type still get classified correctly.
+func imageMIME(contentType string, body []byte) string {
+	ct := strings.TrimSpace(strings.ToLower(contentType))
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	if strings.HasPrefix(ct, "image/") {
+		return ct
+	}
+	sniffLen := len(body)
+	if sniffLen > 512 {
+		sniffLen = 512
+	}
+	sniffed := http.DetectContentType(body[:sniffLen])
+	if i := strings.Index(sniffed, ";"); i >= 0 {
+		sniffed = sniffed[:i]
+	}
+	sniffed = strings.TrimSpace(sniffed)
+	if strings.HasPrefix(sniffed, "image/") {
+		return sniffed
+	}
+	return ""
 }
 
 func looksHTML(contentType string, body []byte) bool {

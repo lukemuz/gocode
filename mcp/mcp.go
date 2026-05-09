@@ -314,7 +314,7 @@ func (s *Server) initialize(ctx context.Context) error {
 		"capabilities":    map[string]interface{}{},
 		"clientInfo": map[string]interface{}{
 			"name":    "gocode",
-			"version": "0.1.1",
+			"version": "0.1.2",
 		},
 	}
 	_, err := s.call(ctx, "initialize", params)

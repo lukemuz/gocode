@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.1.2 — 2026-05-09
+
+### Added
+
+- Image content blocks. New `gocode.TypeImage` constant; `ContentBlock`
+  gained `Source` (base64 data URI or http(s) URL) and `MediaType` fields.
+  Image blocks round-trip as typed fields, not via `Raw`.
+- `gocode.ImageBlock` helper struct and `gocode.NewUserMessageWithImages(text, images)`
+  constructor for emitting user-role turns that carry one text block followed
+  by image blocks.
+- `gocode.ToolResult.Images []ImageBlock` for tools that emit image
+  attachments. `NewToolResultMessage` flattens images from every tool result
+  onto the same canonical user-role message alongside the existing
+  `tool_result` blocks; the OpenAI wire serializer splits them into a
+  sibling `role:"user"` message at send time.
+- `gocode.AttachImage(ctx, ImageBlock)` for ToolFuncs to ride image bytes
+  back to the model alongside their textual output. The agent loop installs
+  a per-call sink and drains it onto `ToolResult.Images`. `WithImageSink`
+  exposes the same primitive for unit-testing image-emitting tools without
+  standing up a full Loop.
+- `tools/workspace/read_file` now recognises images (PNG, JPEG, GIF, WebP,
+  BMP, TIFF) by magic-byte sniff with extension fallback. It returns a
+  one-line metadata payload (`image: <path> (<mime>, <bytes> B)`) and
+  attaches the bytes as a base64 data URI. Bails when the file exceeds
+  `MaxFileBytes` rather than emit a corrupt data URI. Text-file behaviour
+  is unchanged.
+- `tools/web/web_fetch` now recognises `image/*` responses (header first,
+  body sniff fallback). Same metadata-text-plus-data-URI shape as
+  `read_file`. Bails when the body exceeds `MaxBodyBytes`. HTML-to-text and
+  `raw=true` paths are unchanged.
+
+### Changed
+
+- `providers/openai`: the user-role branch of `toOpenAIMessages` now emits
+  the OpenAI typed-parts content shape (`[{type:"text",...},{type:"image_url",
+  image_url:{url:...}}]`) when any image block is present on the canonical
+  message. Plain-string and single-part-text-with-`cache_control` paths
+  remain byte-identical for messages without images. The `role:"tool"`
+  splitting for `tool_result` blocks is unchanged. Same change applies
+  transparently to `providers/openrouter`, which delegates to the shared
+  helpers.
+
 ## v0.1.1 — 2026-05-08
 
 ### Added

@@ -57,12 +57,22 @@ type openAIMessage struct {
 }
 
 // openAIContentPart is one element in the array form of openAIMessage.Content.
-// Only the text variant is supported; cache_control rides along when the
-// message was marked at the canonical layer.
+// Two variants are supported: the text part (Type=="text", Text populated)
+// and the image_url part (Type=="image_url", ImageURL populated). cache_control
+// rides along on text parts when the canonical message marked them.
 type openAIContentPart struct {
-	Type         string               `json:"type"` // always "text"
-	Text         string               `json:"text"`
-	CacheControl *gocode.CacheControl `json:"cache_control,omitempty"`
+	Type         string                `json:"type"` // "text" or "image_url"
+	Text         string                `json:"text,omitempty"`
+	ImageURL     *openAIImageURL       `json:"image_url,omitempty"`
+	CacheControl *gocode.CacheControl  `json:"cache_control,omitempty"`
+}
+
+// openAIImageURL is the value of an image_url content part. URL is either
+// a base64 data URI or a remote http(s) URL; OpenAI Chat Completions and
+// most OpenRouter backends accept both, with data URIs being the more
+// portable choice.
+type openAIImageURL struct {
+	URL string `json:"url"`
 }
 
 // messageContentString coerces the polymorphic Content field back to a
@@ -192,7 +202,7 @@ func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages 
 
 		case gocode.RoleUser:
 			// Separate tool_result blocks into individual tool-role messages;
-			// collect remaining text blocks into a single user message.
+			// collect remaining text + image blocks into a single user message.
 			for _, block := range msg.Content {
 				if block.Type == gocode.TypeToolResult {
 					out = append(out, openAIMessage{
@@ -202,17 +212,62 @@ func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages 
 					})
 				}
 			}
-			text, cache := joinTextBlocks(msg.Content)
-			if text != "" {
+			if userContent, ok := buildUserContent(msg.Content, cacheCompatible); ok {
 				out = append(out, openAIMessage{
 					Role:    gocode.RoleUser,
-					Content: wireTextContent(text, cache, cacheCompatible),
+					Content: userContent,
 				})
 			}
 		}
 	}
 
 	return out
+}
+
+// buildUserContent renders the non-tool_result blocks of a user-role message
+// into the wire shape. When images are present it emits a typed-parts array
+// (text part(s) followed by image_url parts); otherwise it falls through to
+// wireTextContent so backward-compat with the plain-string path is exact.
+// Returns (content, true) when a user message should be emitted, or
+// (nil, false) when there is nothing to send (e.g. tool_result-only turn).
+func buildUserContent(blocks []gocode.ContentBlock, cacheCompatible bool) (any, bool) {
+	hasImage := false
+	for _, b := range blocks {
+		if b.Type == gocode.TypeImage {
+			hasImage = true
+			break
+		}
+	}
+	if !hasImage {
+		text, cache := joinTextBlocks(blocks)
+		if text == "" {
+			return nil, false
+		}
+		return wireTextContent(text, cache, cacheCompatible), true
+	}
+
+	text, cache := joinTextBlocks(blocks)
+	parts := make([]openAIContentPart, 0, 1+len(blocks))
+	if text != "" {
+		part := openAIContentPart{Type: "text", Text: text}
+		if cacheCompatible {
+			part.CacheControl = cache
+		}
+		parts = append(parts, part)
+	}
+	for _, b := range blocks {
+		if b.Type != gocode.TypeImage {
+			continue
+		}
+		parts = append(parts, openAIContentPart{
+			Type:     "image_url",
+			ImageURL: &openAIImageURL{URL: b.Source},
+		})
+	}
+	if len(parts) == 0 {
+		return nil, false
+	}
+	return parts, true
 }
 
 // joinTextBlocks concatenates the text blocks within a Message and returns

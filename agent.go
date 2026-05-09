@@ -432,7 +432,8 @@ func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]T
 				TurnID: turnID, Iter: iter, Type: EventToolCallStart,
 				ToolUseID: use.ID, ToolName: use.Name, ToolInput: use.Input,
 			})
-			output, err := dispatch[use.Name](ctx, use.Input)
+			toolCtx, sink := withImageSink(ctx)
+			output, err := dispatch[use.Name](toolCtx, use.Input)
 			r := ToolResult{ToolUseID: use.ID}
 			endEv := Event{
 				TurnID: turnID, Iter: iter, Type: EventToolCallEnd,
@@ -445,6 +446,7 @@ func runTools(ctx context.Context, content []ContentBlock, dispatch map[string]T
 				endEv.ToolError = err.Error()
 			} else {
 				r.Content = output
+				r.Images = sink.drain()
 				endEv.ToolOutput = output
 			}
 			emit(ctx, rec, endEv)
