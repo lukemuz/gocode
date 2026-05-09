@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
-func mkBinding(name string, meta gocode.ToolMetadata, fn gocode.ToolFunc) gocode.ToolBinding {
-	t := gocode.NewTool(name, "test", gocode.InputSchema{Type: "object", Properties: map[string]gocode.SchemaProperty{}})
-	return gocode.ToolBinding{Tool: t, Func: fn, Meta: meta}
+func mkBinding(name string, meta luft.ToolMetadata, fn luft.ToolFunc) luft.ToolBinding {
+	t := luft.NewTool(name, "test", luft.InputSchema{Type: "object", Properties: map[string]luft.SchemaProperty{}})
+	return luft.ToolBinding{Tool: t, Func: fn, Meta: meta}
 }
 
 func TestBatchRunsConcurrently(t *testing.T) {
@@ -24,10 +24,10 @@ func TestBatchRunsConcurrently(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		return "done", nil
 	}
-	bindings := []gocode.ToolBinding{
-		mkBinding("a", gocode.ToolMetadata{}, slow),
-		mkBinding("b", gocode.ToolMetadata{}, slow),
-		mkBinding("c", gocode.ToolMetadata{}, slow),
+	bindings := []luft.ToolBinding{
+		mkBinding("a", luft.ToolMetadata{}, slow),
+		mkBinding("b", luft.ToolMetadata{}, slow),
+		mkBinding("c", luft.ToolMetadata{}, slow),
 	}
 	b := New(Config{Bindings: bindings})
 
@@ -54,9 +54,9 @@ func TestBatchRunsConcurrently(t *testing.T) {
 }
 
 func TestBatchOmitsConfirmationGated(t *testing.T) {
-	bindings := []gocode.ToolBinding{
-		mkBinding("safe", gocode.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "ok", nil }),
-		mkBinding("dangerous", gocode.ToolMetadata{RequiresConfirmation: true}, func(context.Context, json.RawMessage) (string, error) { return "ok", nil }),
+	bindings := []luft.ToolBinding{
+		mkBinding("safe", luft.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "ok", nil }),
+		mkBinding("dangerous", luft.ToolMetadata{RequiresConfirmation: true}, func(context.Context, json.RawMessage) (string, error) { return "ok", nil }),
 	}
 	b := New(Config{Bindings: bindings})
 
@@ -71,9 +71,9 @@ func TestBatchOmitsConfirmationGated(t *testing.T) {
 }
 
 func TestBatchOmitsItself(t *testing.T) {
-	bindings := []gocode.ToolBinding{
-		mkBinding("safe", gocode.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "ok", nil }),
-		mkBinding(Name, gocode.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "loop", nil }),
+	bindings := []luft.ToolBinding{
+		mkBinding("safe", luft.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "ok", nil }),
+		mkBinding(Name, luft.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "loop", nil }),
 	}
 	b := New(Config{Bindings: bindings})
 
@@ -88,9 +88,9 @@ func TestBatchOmitsItself(t *testing.T) {
 }
 
 func TestBatchPropagatesErrors(t *testing.T) {
-	bindings := []gocode.ToolBinding{
-		mkBinding("ok", gocode.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "fine", nil }),
-		mkBinding("bad", gocode.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "", fmt.Errorf("boom") }),
+	bindings := []luft.ToolBinding{
+		mkBinding("ok", luft.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "fine", nil }),
+		mkBinding("bad", luft.ToolMetadata{}, func(context.Context, json.RawMessage) (string, error) { return "", fmt.Errorf("boom") }),
 	}
 	b := New(Config{Bindings: bindings})
 

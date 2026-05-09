@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // captureRequest records the JSON body of the most recent POST so tests can
@@ -58,10 +58,10 @@ func TestWebSearch_WireForm(t *testing.T) {
 		t.Fatalf("Provider = %q, want %q", pt.Provider, ProviderTag)
 	}
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:         "claude-test",
-		Messages:      []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{pt},
+		Messages:      []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{pt},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -95,10 +95,10 @@ func TestCodeExecution_WireForm(t *testing.T) {
 		`{"id":"msg_1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:         "claude-test",
-		Messages:      []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{CodeExecution()},
+		Messages:      []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{CodeExecution()},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -135,10 +135,10 @@ func TestBashTool_WireFormAndDispatch(t *testing.T) {
 		t.Errorf("Provider = %q, want %q", binding.Tool.Provider, ProviderTag)
 	}
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:    []gocode.Tool{binding.Tool},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		Tools:    []luft.Tool{binding.Tool},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -174,10 +174,10 @@ func TestTextEditorTool_WireForm(t *testing.T) {
 		t.Errorf("Name = %q, want str_replace_editor", binding.Tool.Name)
 	}
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:    []gocode.Tool{binding.Tool},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		Tools:    []luft.Tool{binding.Tool},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -197,10 +197,10 @@ func TestComputerTool_WireForm(t *testing.T) {
 		ComputerOpts{DisplayWidthPx: 1024, DisplayHeightPx: 768, DisplayNumber: 1},
 		func(_ context.Context, _ json.RawMessage) (string, error) { return "", nil },
 	)
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:    []gocode.Tool{binding.Tool},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		Tools:    []luft.Tool{binding.Tool},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -222,15 +222,15 @@ func TestToolMixWithStandardTool(t *testing.T) {
 		`{"id":"msg_1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	std := gocode.NewTool("calc", "do math",
-		gocode.Object(gocode.Number("a", "", gocode.Required())))
+	std := luft.NewTool("calc", "do math",
+		luft.Object(luft.Number("a", "", luft.Required())))
 	bash := BashTool(func(_ context.Context, _ json.RawMessage) (string, error) { return "", nil })
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:         "claude-test",
-		Messages:      []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:         []gocode.Tool{std, bash.Tool},
-		ProviderTools: []gocode.ProviderTool{WebSearch(WebSearchOpts{})},
+		Messages:      []luft.Message{luft.NewUserMessage("hi")},
+		Tools:         []luft.Tool{std, bash.Tool},
+		ProviderTools: []luft.ProviderTool{WebSearch(WebSearchOpts{})},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -260,11 +260,11 @@ func TestProvider_RejectsForeignProviderTool(t *testing.T) {
 	srv, _ := newCaptureServer(t, `{"id":"msg","content":[],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	bad := gocode.ProviderTool{Provider: "openai", Raw: json.RawMessage(`{"type":"web_search"}`)}
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	bad := luft.ProviderTool{Provider: "openai", Raw: json.RawMessage(`{"type":"web_search"}`)}
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:         "claude-test",
-		Messages:      []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{bad},
+		Messages:      []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{bad},
 	})
 	if err == nil || !strings.Contains(err.Error(), "tagged for provider") {
 		t.Fatalf("expected provider mismatch error, got %v", err)
@@ -280,11 +280,11 @@ func TestSystemCacheEmitsArrayForm(t *testing.T) {
 		`{"id":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:       "claude-test",
 		System:      "stable instructions",
-		Messages:    []gocode.Message{gocode.NewUserMessage("hi")},
-		SystemCache: gocode.Ephemeral(),
+		Messages:    []luft.Message{luft.NewUserMessage("hi")},
+		SystemCache: luft.Ephemeral(),
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -312,10 +312,10 @@ func TestNoSystemCacheKeepsString(t *testing.T) {
 		`{"id":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
 		System:   "stable instructions",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -332,14 +332,14 @@ func TestToolCacheControlEmitted(t *testing.T) {
 		`{"id":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	tool := gocode.NewTool("calc", "do math",
-		gocode.Object(gocode.Number("a", "v", gocode.Required())))
-	tool.CacheControl = gocode.EphemeralExtended()
+	tool := luft.NewTool("calc", "do math",
+		luft.Object(luft.Number("a", "v", luft.Required())))
+	tool.CacheControl = luft.EphemeralExtended()
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:    []gocode.Tool{tool},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		Tools:    []luft.Tool{tool},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -362,12 +362,12 @@ func TestMessageCacheControlEmitted(t *testing.T) {
 		`{"id":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`)
 	p := newProviderForTest(t, srv.URL)
 
-	msg := gocode.Message{Role: gocode.RoleUser, Content: []gocode.ContentBlock{
-		{Type: gocode.TypeText, Text: "long context", CacheControl: gocode.Ephemeral()},
+	msg := luft.Message{Role: luft.RoleUser, Content: []luft.ContentBlock{
+		{Type: luft.TypeText, Text: "long context", CacheControl: luft.Ephemeral()},
 	}}
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
-		Messages: []gocode.Message{msg},
+		Messages: []luft.Message{msg},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -398,9 +398,9 @@ func TestDecodesCacheUsage(t *testing.T) {
 	srv, _ := newCaptureServer(t, reply)
 	p := newProviderForTest(t, srv.URL)
 
-	out, err := p.Call(context.Background(), gocode.ProviderRequest{
+	out, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)

@@ -4,7 +4,7 @@
 //
 // Use NewReadOnly for the five read-only tools (list_directory, Glob,
 // Grep, read_file, file_info). Use New to also include edit_file; pair
-// it with the gocode.WithConfirmation middleware to gate writes.
+// it with the luft.WithConfirmation middleware to gate writes.
 package workspace
 
 import (
@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 const (
@@ -53,25 +53,25 @@ const (
 var defaultSkipDirs = map[string]bool{
 	".git": true, ".hg": true, ".svn": true,
 	"node_modules": true, "bower_components": true,
-	"vendor":         true,
-	"target":         true,
-	"dist":           true,
-	"build":          true,
-	"out":            true,
-	".next":          true,
-	".nuxt":          true,
-	".cache":         true,
-	".parcel-cache":  true,
-	"__pycache__":    true,
-	".venv":          true,
-	"venv":           true,
-	".tox":           true,
-	".pytest_cache":  true,
-	".mypy_cache":    true,
-	".gradle":        true,
-	".idea":          true,
-	".vscode":        true,
-	"coverage":       true,
+	"vendor":        true,
+	"target":        true,
+	"dist":          true,
+	"build":         true,
+	"out":           true,
+	".next":         true,
+	".nuxt":         true,
+	".cache":        true,
+	".parcel-cache": true,
+	"__pycache__":   true,
+	".venv":         true,
+	"venv":          true,
+	".tox":          true,
+	".pytest_cache": true,
+	".mypy_cache":   true,
+	".gradle":       true,
+	".idea":         true,
+	".vscode":       true,
+	"coverage":      true,
 }
 
 // binaryExts is a fast-path: files with these extensions are skipped by
@@ -79,14 +79,14 @@ var defaultSkipDirs = map[string]bool{
 // else; this just avoids the open() syscall on the obvious cases.
 var binaryExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true, ".webp": true, ".ico": true, ".tiff": true,
-	".pdf":  true,
-	".zip":  true, ".tar": true, ".gz": true, ".bz2": true, ".xz": true, ".7z": true, ".rar": true,
-	".exe":  true, ".dll": true, ".so": true, ".dylib": true, ".a": true, ".o": true,
+	".pdf": true,
+	".zip": true, ".tar": true, ".gz": true, ".bz2": true, ".xz": true, ".7z": true, ".rar": true,
+	".exe": true, ".dll": true, ".so": true, ".dylib": true, ".a": true, ".o": true,
 	".class": true, ".jar": true, ".war": true,
-	".mp3":   true, ".mp4": true, ".wav": true, ".avi": true, ".mov": true, ".mkv": true, ".flac": true, ".ogg": true,
-	".woff":  true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
-	".pyc":   true, ".pyo": true,
-	".bin":   true, ".dat": true,
+	".mp3": true, ".mp4": true, ".wav": true, ".avi": true, ".mov": true, ".mkv": true, ".flac": true, ".ogg": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	".pyc": true, ".pyo": true,
+	".bin": true, ".dat": true,
 }
 
 // Config controls Workspace tool behaviour.
@@ -123,19 +123,19 @@ type Config struct {
 //	result, err := client.Loop(ctx, system, history, ws.Toolset(), 10)
 //
 //	// Or compose with other toolsets:
-//	toolset := gocode.MustJoin(clockset, ws.Toolset())
+//	toolset := luft.MustJoin(clockset, ws.Toolset())
 type Workspace struct {
 	root         string
 	maxFileBytes int64
 	maxResults   int
 	skipDirs     map[string]bool
-	bindings     []gocode.ToolBinding
+	bindings     []luft.ToolBinding
 }
 
 // New creates a Workspace with all six tools: the five read-only tools from
 // NewReadOnly plus edit_file for in-place text replacement. The edit_file tool
 // carries RequiresConfirmation: true metadata; pair the returned Toolset with
-// gocode.WithConfirmation to gate writes.
+// luft.WithConfirmation to gate writes.
 // Returns an error if cfg.Root is empty or cannot be resolved to an absolute path.
 func New(cfg Config) (*Workspace, error) {
 	w, err := NewReadOnly(cfg)
@@ -180,21 +180,21 @@ func NewReadOnly(cfg Config) (*Workspace, error) {
 	return w, nil
 }
 
-// Toolset returns all workspace bindings as a gocode.Toolset.
-func (w *Workspace) Toolset() gocode.Toolset {
-	return gocode.Toolset{Bindings: w.bindings}
+// Toolset returns all workspace bindings as a luft.Toolset.
+func (w *Workspace) Toolset() luft.Toolset {
+	return luft.Toolset{Bindings: w.bindings}
 }
 
 // Tools returns the model-facing Tool slice. Most callers should use
 // Toolset() and pass it to Client.Loop directly; Tools() exists for
 // inspection and for callers building a custom loop on top of the
 // provider primitives.
-func (w *Workspace) Tools() []gocode.Tool {
+func (w *Workspace) Tools() []luft.Tool {
 	return w.Toolset().Tools()
 }
 
 // Dispatch returns the name→func map. See Tools() for when to use this.
-func (w *Workspace) Dispatch() map[string]gocode.ToolFunc {
+func (w *Workspace) Dispatch() map[string]luft.ToolFunc {
 	return w.Toolset().Dispatch()
 }
 
@@ -264,22 +264,22 @@ type editFileInput struct {
 
 // ---- binding construction ---------------------------------------------------
 
-func (w *Workspace) buildBindings() []gocode.ToolBinding {
-	meta := gocode.ToolMetadata{
+func (w *Workspace) buildBindings() []luft.ToolBinding {
+	meta := luft.ToolMetadata{
 		Source:     "tools/workspace",
 		ReadOnly:   true,
 		Filesystem: true,
 	}
 
-	listDirTool := gocode.NewTool(
+	listDirTool := luft.NewTool(
 		"list_directory",
 		"Lists files and directories at a path relative to the workspace root. Non-recursive.",
-		gocode.Object(
-			gocode.String("path", `Directory to list, relative to the workspace root. Defaults to "." (the root).`),
+		luft.Object(
+			luft.String("path", `Directory to list, relative to the workspace root. Defaults to "." (the root).`),
 		),
 	)
 
-	findFilesTool := gocode.NewTool(
+	findFilesTool := luft.NewTool(
 		"Glob",
 		"Finds files matching a glob pattern under a path relative to the workspace root. "+
 			"Supports `*` (any characters within a path segment), `?` (single char), `[abc]` (char class), "+
@@ -289,13 +289,13 @@ func (w *Workspace) buildBindings() []gocode.ToolBinding {
 			"Common bloat directories (.git, node_modules, vendor, target, dist, build, .venv, __pycache__, etc.) "+
 			"are skipped automatically. To search inside one, pass it explicitly as `path`. "+
 			"Results are root-relative slash paths, capped at MaxResults.",
-		gocode.Object(
-			gocode.String("pattern", "Glob pattern. Examples: `*.go`, `**/*.ts`, `pkg/**/*_test.go`.", gocode.Required()),
-			gocode.String("path", `Directory to search under, relative to the workspace root. Defaults to ".".`),
+		luft.Object(
+			luft.String("pattern", "Glob pattern. Examples: `*.go`, `**/*.ts`, `pkg/**/*_test.go`.", luft.Required()),
+			luft.String("path", `Directory to search under, relative to the workspace root. Defaults to ".".`),
 		),
 	)
 
-	searchTextTool := gocode.NewTool(
+	searchTextTool := luft.NewTool(
 		"Grep",
 		"Searches file contents for lines matching a pattern. The pattern is treated as a Go regular expression — "+
 			"plain literals (no regex metachars) take a fast non-regex path automatically. "+
@@ -303,66 +303,66 @@ func (w *Workspace) buildBindings() []gocode.ToolBinding {
 			"Skips common bloat directories (.git, node_modules, vendor, build, dist, target, .venv, __pycache__, etc.) "+
 			"and binary files (by extension and by NUL-byte sniff). "+
 			"Walks the tree in parallel; capped at MaxResults matches.",
-		gocode.Object(
-			gocode.String("pattern", "Pattern to search for. Plain literals are fastest; full Go regex syntax is supported.", gocode.Required()),
-			gocode.String("path", `Directory to search under, relative to the workspace root. Defaults to ".".`),
-			gocode.String("include", `Optional glob filter, applied to each file's path relative to the search base (e.g. "*.go", "src/**/*.ts").`),
+		luft.Object(
+			luft.String("pattern", "Pattern to search for. Plain literals are fastest; full Go regex syntax is supported.", luft.Required()),
+			luft.String("path", `Directory to search under, relative to the workspace root. Defaults to ".".`),
+			luft.String("include", `Optional glob filter, applied to each file's path relative to the search base (e.g. "*.go", "src/**/*.ts").`),
 		),
 	)
 
-	readFileTool := gocode.NewTool(
+	readFileTool := luft.NewTool(
 		"read_file",
 		"Reads the contents of a file. Respects MaxFileBytes. "+
 			"Optionally restricts output to a line range (1-indexed, inclusive). "+
 			"When the file is an image (png, jpeg, gif, webp, bmp, tiff), the text payload "+
 			"is a one-line metadata summary and the image bytes are attached to the result "+
 			"so the model receives them as visual content.",
-		gocode.Object(
-			gocode.String("path", "File path relative to the workspace root.", gocode.Required()),
-			gocode.Integer("start_line", "First line to include (1-indexed). 0 or omitted means start of file."),
-			gocode.Integer("end_line", "Last line to include (1-indexed, inclusive). 0 or omitted means end of file."),
+		luft.Object(
+			luft.String("path", "File path relative to the workspace root.", luft.Required()),
+			luft.Integer("start_line", "First line to include (1-indexed). 0 or omitted means start of file."),
+			luft.Integer("end_line", "Last line to include (1-indexed, inclusive). 0 or omitted means end of file."),
 		),
 	)
 
-	fileInfoTool := gocode.NewTool(
+	fileInfoTool := luft.NewTool(
 		"file_info",
 		"Returns metadata (name, size, modification time, is_dir, mode) for a path relative to the workspace root.",
-		gocode.Object(
-			gocode.String("path", "Path relative to the workspace root.", gocode.Required()),
+		luft.Object(
+			luft.String("path", "Path relative to the workspace root.", luft.Required()),
 		),
 	)
 
-	return []gocode.ToolBinding{
-		{Tool: listDirTool, Func: gocode.TypedToolFunc(w.listDirectory), Meta: meta},
-		{Tool: findFilesTool, Func: gocode.TypedToolFunc(w.findFiles), Meta: meta},
-		{Tool: searchTextTool, Func: gocode.TypedToolFunc(w.searchText), Meta: meta},
-		{Tool: readFileTool, Func: gocode.TypedToolFunc(w.readFile), Meta: meta},
-		{Tool: fileInfoTool, Func: gocode.TypedToolFunc(w.fileInfo), Meta: meta},
+	return []luft.ToolBinding{
+		{Tool: listDirTool, Func: luft.TypedToolFunc(w.listDirectory), Meta: meta},
+		{Tool: findFilesTool, Func: luft.TypedToolFunc(w.findFiles), Meta: meta},
+		{Tool: searchTextTool, Func: luft.TypedToolFunc(w.searchText), Meta: meta},
+		{Tool: readFileTool, Func: luft.TypedToolFunc(w.readFile), Meta: meta},
+		{Tool: fileInfoTool, Func: luft.TypedToolFunc(w.fileInfo), Meta: meta},
 	}
 }
 
-func (w *Workspace) buildEditBinding() gocode.ToolBinding {
-	editMeta := gocode.ToolMetadata{
+func (w *Workspace) buildEditBinding() luft.ToolBinding {
+	editMeta := luft.ToolMetadata{
 		Source:               "tools/workspace",
 		ReadOnly:             false,
 		Destructive:          true,
 		Filesystem:           true,
 		RequiresConfirmation: true,
 	}
-	editFileTool := gocode.NewTool(
+	editFileTool := luft.NewTool(
 		"edit_file",
 		"Replaces all occurrences of old_string with new_string in a file. "+
 			"Returns an error if old_string is not found. "+
 			"Set expected_count to a positive integer to assert the exact number of replacements; "+
 			"the edit is rejected when the actual count differs.",
-		gocode.Object(
-			gocode.String("path", "File path relative to the workspace root.", gocode.Required()),
-			gocode.String("old_string", "Exact string to find and replace.", gocode.Required()),
-			gocode.String("new_string", "Replacement string.", gocode.Required()),
-			gocode.Integer("expected_count", "Expected number of occurrences. When non-zero, the edit is rejected if the actual count differs."),
+		luft.Object(
+			luft.String("path", "File path relative to the workspace root.", luft.Required()),
+			luft.String("old_string", "Exact string to find and replace.", luft.Required()),
+			luft.String("new_string", "Replacement string.", luft.Required()),
+			luft.Integer("expected_count", "Expected number of occurrences. When non-zero, the edit is rejected if the actual count differs."),
 		),
 	)
-	return gocode.ToolBinding{Tool: editFileTool, Func: gocode.TypedToolFunc(w.editFile), Meta: editMeta}
+	return luft.ToolBinding{Tool: editFileTool, Func: luft.TypedToolFunc(w.editFile), Meta: editMeta}
 }
 
 // ---- tool implementations ---------------------------------------------------
@@ -388,7 +388,7 @@ func (w *Workspace) listDirectory(_ context.Context, in listDirInput) (string, e
 	for i, e := range entries {
 		out[i] = entry{Name: e.Name(), IsDir: e.IsDir()}
 	}
-	return gocode.JSONResult(out)
+	return luft.JSONResult(out)
 }
 
 func (w *Workspace) findFiles(_ context.Context, in findFilesInput) (string, error) {
@@ -432,7 +432,7 @@ func (w *Workspace) findFiles(_ context.Context, in findFilesInput) (string, err
 	if err != nil {
 		return "", fmt.Errorf("Glob: %w", err)
 	}
-	return gocode.JSONResult(matches)
+	return luft.JSONResult(matches)
 }
 
 func (w *Workspace) searchText(ctx context.Context, in searchTextInput) (string, error) {
@@ -548,7 +548,7 @@ func (w *Workspace) searchText(ctx context.Context, in searchTextInput) (string,
 		}
 		return matches[i].Line < matches[j].Line
 	})
-	return gocode.JSONResult(matches)
+	return luft.JSONResult(matches)
 }
 
 // grepMatch is one Grep result row.
@@ -707,7 +707,7 @@ func (w *Workspace) readFile(ctx context.Context, in readFileInput) (string, err
 			if truncated != "" {
 				return "", fmt.Errorf("read_file: image %q exceeds %d byte cap", in.Path, w.maxFileBytes)
 			}
-			gocode.AttachImage(ctx, gocode.ImageBlock{
+			luft.AttachImage(ctx, luft.ImageBlock{
 				Source:    "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data),
 				MediaType: mime,
 			})

@@ -1,25 +1,25 @@
 # Recipe 05: persistent chat with an event log
 
-Demonstrates `gocode`'s position that **you own the data, not a
+Demonstrates `luft`'s position that **you own the data, not a
 `SessionService`**. Session state is plain Go data, persistence is a five-method
 interface, and a `Recorder` captures intermediate turn activity into
 `Session.Events` alongside the model-facing `History`.
 
 ## What this shows
 
-- **Open-or-create** with `gocode.Load` — first call creates, later calls load.
+- **Open-or-create** with `luft.Load` — first call creates, later calls load.
 - **Read-modify-write** turn loop:
   ```go
-  sess.History = append(sess.History, gocode.NewUserMessage(input))
+  sess.History = append(sess.History, luft.NewUserMessage(input))
   result, err := assistant.Step(ctx, sess.History)
   // failed turn → sess.History unchanged → next attempt starts from the same place
   sess.History = result.Messages
-  gocode.Save(ctx, store, sess)
+  luft.Save(ctx, store, sess)
   ```
 - **`FileStore`** as one Store implementation; the same code works against
   `NewMemoryStore()` for tests and would work against a Postgres or Redis
   store you write yourself in ~80 lines.
-- **`gocode.RecorderToSession(sess)`** — a `Recorder` that appends every
+- **`luft.RecorderToSession(sess)`** — a `Recorder` that appends every
   model request/response, retry, and tool call to `sess.Events`. After
   `Save`, the full intra-turn activity log is on disk next to `History`.
 - **`-dump`** flag formats the recorded events into a per-turn timeline so
@@ -35,16 +35,16 @@ go run ./examples/recipes/05-persistent-chat -id alice "and minus 100?"
 go run ./examples/recipes/05-persistent-chat -id alice -dump
 ```
 
-The session lives at `$TMPDIR/gocode-chat/alice.json` — it's a plain JSON
+The session lives at `$TMPDIR/luft-chat/alice.json` — it's a plain JSON
 document you can `cat`, `jq`, diff, or hand-edit.
 
 ## Library features exercised
 
-- `gocode.Session`, `gocode.Store`, `gocode.FileStore`
-- `gocode.Load`, `gocode.Save` (open-or-create / upsert convenience)
-- `gocode.Recorder` interface + `gocode.RecorderToSession`
-- `gocode.Event` and the `EventType` constants
-- `gocode.Agent` driving the turn
+- `luft.Session`, `luft.Store`, `luft.FileStore`
+- `luft.Load`, `luft.Save` (open-or-create / upsert convenience)
+- `luft.Recorder` interface + `luft.RecorderToSession`
+- `luft.Event` and the `EventType` constants
+- `luft.Agent` driving the turn
 - Built-in tools: `tools/math`
 
 ## ADK comparison

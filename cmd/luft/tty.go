@@ -10,7 +10,7 @@ import (
 )
 
 // ANSI escape sequences. We deliberately keep this tiny and self-contained
-// rather than pull in a colour library — gocode's go.mod is dep-free and
+// rather than pull in a colour library — luft's go.mod is dep-free and
 // staying that way is a feature.
 const (
 	ansiReset    = "\x1b[0m"

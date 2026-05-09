@@ -3,17 +3,17 @@ package main
 import (
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 func TestFindCutPointKeepsRecentTurns(t *testing.T) {
-	h := []gocode.Message{
-		gocode.NewUserMessage("hello"),                 // user-typed #1 (idx 0)
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{{Type: gocode.TypeText, Text: "hi"}}},
-		gocode.NewUserMessage("now what"),              // user-typed #2 (idx 2)
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{{Type: gocode.TypeText, Text: "ok"}}},
-		gocode.NewUserMessage("third question"),        // user-typed #3 (idx 4)
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{{Type: gocode.TypeText, Text: "ok"}}},
+	h := []luft.Message{
+		luft.NewUserMessage("hello"), // user-typed #1 (idx 0)
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{{Type: luft.TypeText, Text: "hi"}}},
+		luft.NewUserMessage("now what"), // user-typed #2 (idx 2)
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{{Type: luft.TypeText, Text: "ok"}}},
+		luft.NewUserMessage("third question"), // user-typed #3 (idx 4)
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{{Type: luft.TypeText, Text: "ok"}}},
 	}
 	// keepRecent=2 should cut at the start of user-typed #2.
 	if got := findCutPoint(h, 2); got != 2 {
@@ -28,13 +28,13 @@ func TestFindCutPointKeepsRecentTurns(t *testing.T) {
 }
 
 func TestFindCutPointSkipsToolResults(t *testing.T) {
-	toolResultMsg := gocode.NewToolResultMessage([]gocode.ToolResult{{ToolUseID: "x", Content: "ok"}})
-	h := []gocode.Message{
-		gocode.NewUserMessage("real one"), // idx 0 — user-typed
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{{Type: gocode.TypeText, Text: "..."}}},
+	toolResultMsg := luft.NewToolResultMessage([]luft.ToolResult{{ToolUseID: "x", Content: "ok"}})
+	h := []luft.Message{
+		luft.NewUserMessage("real one"), // idx 0 — user-typed
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{{Type: luft.TypeText, Text: "..."}}},
 		toolResultMsg, // idx 2 — synthetic tool-result, not a user turn
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{{Type: gocode.TypeText, Text: "..."}}},
-		gocode.NewUserMessage("second real"), // idx 4 — user-typed
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{{Type: luft.TypeText, Text: "..."}}},
+		luft.NewUserMessage("second real"), // idx 4 — user-typed
 	}
 	// Only 2 user-typed turns; keep=1 cuts at idx 4 (the "second real").
 	if got := findCutPoint(h, 1); got != 4 {
@@ -49,11 +49,11 @@ func TestFindCutPointEmptyHistory(t *testing.T) {
 }
 
 func TestRenderTranscriptIncludesAllRoles(t *testing.T) {
-	h := []gocode.Message{
-		gocode.NewUserMessage("hello"),
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{
-			{Type: gocode.TypeText, Text: "thinking"},
-			{Type: gocode.TypeToolUse, ID: "abc", Name: "Grep", Input: []byte(`{"q":"foo"}`)},
+	h := []luft.Message{
+		luft.NewUserMessage("hello"),
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{
+			{Type: luft.TypeText, Text: "thinking"},
+			{Type: luft.TypeToolUse, ID: "abc", Name: "Grep", Input: []byte(`{"q":"foo"}`)},
 		}},
 	}
 	out := renderTranscript(h)

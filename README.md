@@ -1,4 +1,4 @@
-# gocode
+# luft
 
 A small Go library for LLM calls, tools, and agent loops.
 
@@ -6,7 +6,7 @@ A small Go library for LLM calls, tools, and agent loops.
 >
 > You own the data. You own the tools. You own the loop.
 
-`gocode` scales from one model call to practical tool-using assistants without forcing a framework-shaped runtime onto simple programs.
+`luft` scales from one model call to practical tool-using assistants without forcing a framework-shaped runtime onto simple programs.
 
 It gives you:
 
@@ -25,7 +25,7 @@ Requires Go 1.21+. No external dependencies in the core package.
 ## Install
 
 ~~~bash
-go get github.com/lukemuz/gocode
+go get github.com/lukemuz/luft
 ~~~
 
 Set an API key for the provider you want:
@@ -39,13 +39,13 @@ export OPENROUTER_API_KEY=sk-or-...
 ## The smallest useful call
 
 ~~~go
-client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
+client, err := anthropic.NewClientFromEnv(luft.ModelSonnet)
 if err != nil {
     log.Fatal(err)
 }
 
-history := []gocode.Message{
-    gocode.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
+history := []luft.Message{
+    luft.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
 }
 
 reply, _, err := client.Ask(context.Background(), "You are concise.", history)
@@ -53,7 +53,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-fmt.Println(gocode.TextContent(reply))
+fmt.Println(luft.TextContent(reply))
 ~~~
 
 No hidden session. No runner. `history` is just data.
@@ -64,7 +64,7 @@ For a step-by-step walkthrough see [`QUICKSTART.md`](QUICKSTART.md). For the des
 
 ### `Provider`
 
-A `Provider` translates between `gocode`'s data model and an LLM API.
+A `Provider` translates between `luft`'s data model and an LLM API.
 
 ~~~go
 type Provider interface {
@@ -80,9 +80,9 @@ Anthropic, OpenAI Chat Completions, OpenAI Responses, and OpenRouter are include
 A `Client` holds provider, model, token limit, and retry config. It does not store conversation state, so the same client reuses across conversations, requests, jobs, and goroutines.
 
 ~~~go
-client, err := gocode.New(gocode.Config{
+client, err := luft.New(luft.Config{
     Provider:  provider,
-    Model:     gocode.ModelSonnet,
+    Model:     luft.ModelSonnet,
     MaxTokens: 4096,
 })
 ~~~
@@ -92,10 +92,10 @@ client, err := gocode.New(gocode.Config{
 Conversation history is plain data. Append replies yourself when you want to continue:
 
 ~~~go
-history := []gocode.Message{gocode.NewUserMessage("Hello")}
+history := []luft.Message{luft.NewUserMessage("Hello")}
 
 reply, _, err := client.Ask(ctx, system, history)
-history = append(history, reply, gocode.NewUserMessage("Tell me more."))
+history = append(history, reply, luft.NewUserMessage("Tell me more."))
 ~~~
 
 ### `Tool` and `ToolFunc`
@@ -103,13 +103,13 @@ history = append(history, reply, gocode.NewUserMessage("Tell me more."))
 A tool has two parts: a model-facing definition and a Go function.
 
 ~~~go
-tool, fn := gocode.NewTypedTool(
+tool, fn := luft.NewTypedTool(
     "calculator",
     "Do basic arithmetic.",
-    gocode.Object(
-        gocode.String("operation", "add, subtract, multiply, or divide", gocode.Required()),
-        gocode.Number("a", "First number", gocode.Required()),
-        gocode.Number("b", "Second number", gocode.Required()),
+    luft.Object(
+        luft.String("operation", "add, subtract, multiply, or divide", luft.Required()),
+        luft.Number("a", "First number", luft.Required()),
+        luft.Number("b", "Second number", luft.Required()),
     ),
     func(ctx context.Context, in CalculatorInput) (string, error) {
         return calculate(in)
@@ -117,12 +117,12 @@ tool, fn := gocode.NewTypedTool(
 )
 ~~~
 
-Tools compile down to ordinary values. A `Toolset` is an ordered slice of `ToolBinding{Tool, Func, Meta}`. `gocode.Tools(...)` and `gocode.Bind(tool, fn)` are variadic constructors for the common case:
+Tools compile down to ordinary values. A `Toolset` is an ordered slice of `ToolBinding{Tool, Func, Meta}`. `luft.Tools(...)` and `luft.Bind(tool, fn)` are variadic constructors for the common case:
 
 ~~~go
-tools := gocode.Tools(
-    gocode.Bind(tool, fn),
-    gocode.Bind(other, otherFn),
+tools := luft.Tools(
+    luft.Bind(tool, fn),
+    luft.Bind(other, otherFn),
 )
 ~~~
 
@@ -148,7 +148,7 @@ fmt.Println(result.FinalText())
 
 `Loop` calls the model, runs requested tools, appends tool results, and repeats until the model returns a final answer or the iteration limit. Multiple tool calls in one model turn run concurrently and return in original order.
 
-Because `Ask`, `Loop`, and `Agent.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel with `gocode.Parallel`, then synthesize their outputs with a later `Ask`.
+Because `Ask`, `Loop`, and `Agent.Step` are ordinary calls over plain data, they compose like any Go function — run two tool-using loops in parallel with `luft.Parallel`, then synthesize their outputs with a later `Ask`.
 
 ### Typed extraction
 
@@ -159,12 +159,12 @@ type Plan struct {
     Steps []string `json:"steps"`
 }
 
-plan, result, err := gocode.Extract[Plan](ctx, client, system, history,
-    gocode.ExtractParams[Plan]{
+plan, result, err := luft.Extract[Plan](ctx, client, system, history,
+    luft.ExtractParams[Plan]{
         Description: "Submit the final plan as a list of ordered steps.",
-        Schema: gocode.Object(
-            gocode.Array("steps", "ordered steps",
-                gocode.SchemaProperty{Type: "string"}, gocode.Required()),
+        Schema: luft.Object(
+            luft.Array("steps", "ordered steps",
+                luft.SchemaProperty{Type: "string"}, luft.Required()),
         ),
         // Tools: searchTools,           // optional: search-then-submit
         // Validate: func(p Plan) error  // optional: reject and let the model retry
@@ -178,10 +178,10 @@ plan, result, err := gocode.Extract[Plan](ctx, client, system, history,
 ### Toolsets and middleware
 
 ~~~go
-toolset := gocode.MustJoin(clockTool.Toolset(), workspaceToolset).Wrap(
-    gocode.WithTimeout(5*time.Second),
-    gocode.WithResultLimit(20_000),
-    gocode.WithConfirmation(confirm),
+toolset := luft.MustJoin(clockTool.Toolset(), workspaceToolset).Wrap(
+    luft.WithTimeout(5*time.Second),
+    luft.WithResultLimit(20_000),
+    luft.WithConfirmation(confirm),
 )
 
 result, err := client.Loop(ctx, system, history, toolset, 10)
@@ -196,7 +196,7 @@ Available middleware: `WithTimeout`, `WithResultLimit`, `WithLogging`, `WithPani
 `ContextManager` trims history explicitly before a call.
 
 ~~~go
-cm := gocode.ContextManager{MaxTokens: 8000, KeepFirst: 1, KeepRecent: 20}
+cm := luft.ContextManager{MaxTokens: 8000, KeepFirst: 1, KeepRecent: 20}
 trimmed, err := cm.Trim(ctx, history)
 ~~~
 
@@ -207,16 +207,16 @@ The original history is not mutated. Tool-use/tool-result integrity is preserved
 `Agent` is the blessed middle path: a thin block over a client, prompt, toolset, context manager, iteration limit, and hooks.
 
 ~~~go
-a := gocode.Agent{
+a := luft.Agent{
     Client:  client,
     System:  "You are a helpful assistant.",
     Tools:   toolset,
-    Context: gocode.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+    Context: luft.ContextManager{MaxTokens: 8000, KeepRecent: 20},
     MaxIter: 10,
 }
 
 // One-shot autonomous task: pass the goal as a single user message.
-result, err := a.Step(ctx, []gocode.Message{gocode.NewUserMessage("do the thing")})
+result, err := a.Step(ctx, []luft.Message{luft.NewUserMessage("do the thing")})
 
 // Multi-turn: call Step once per human turn, threading history.
 result, err = a.Step(ctx, history)
@@ -235,7 +235,7 @@ result, err = a.Step(ctx, history)
 ~~~go
 clockTool := clock.New()
 ws, err := workspace.NewReadOnly(workspace.Config{Root: "."})
-toolset := gocode.MustJoin(clockTool.Toolset(), ws.Toolset())
+toolset := luft.MustJoin(clockTool.Toolset(), ws.Toolset())
 ~~~
 
 `workspace.NewReadOnly` is read-only. `workspace.New` includes `edit_file` — wrap it with `WithConfirmation` before letting writes run.
@@ -248,20 +248,20 @@ Some tools live on the provider side: Anthropic and OpenAI ship a set of tools t
 
 ~~~go
 import (
-    "github.com/lukemuz/gocode"
-    "github.com/lukemuz/gocode/providers/anthropic"
-    "github.com/lukemuz/gocode/providers/openai"
+    "github.com/lukemuz/luft"
+    "github.com/lukemuz/luft/providers/anthropic"
+    "github.com/lukemuz/luft/providers/openai"
 )
 
 // Anthropic — works against the standard Messages API.
-toolset := gocode.Tools(myLocalBinding).
+toolset := luft.Tools(myLocalBinding).
     WithProviderTools(
         anthropic.WebSearch(anthropic.WebSearchOpts{MaxUses: 3}),
         anthropic.CodeExecution(),
     )
 
 // OpenAI Responses — needs openai.NewResponsesProvider.
-toolset := gocode.Tools(myLocalBinding).
+toolset := luft.Tools(myLocalBinding).
     WithProviderTools(
         openai.WebSearch(),
         openai.CodeInterpreter(openai.CodeInterpreterOpts{}),
@@ -272,13 +272,13 @@ toolset := gocode.Tools(myLocalBinding).
 
 The agent loop never dispatches these — the response carries provider-specific result items (`server_tool_use`, `web_search_call`, `code_interpreter_call`, …) that round-trip verbatim via `ContentBlock.Raw`.
 
-**Provider-defined schema, you execute (category 2):** the model has been trained on the tool's name and arguments, but you supply the runtime — `bash`, `text_editor`, `computer`. The wire declaration is `{type, name}` instead of `{name, description, input_schema}`, and the dispatch flow is identical to a normal tool. Constructors return ordinary `gocode.ToolBinding`s:
+**Provider-defined schema, you execute (category 2):** the model has been trained on the tool's name and arguments, but you supply the runtime — `bash`, `text_editor`, `computer`. The wire declaration is `{type, name}` instead of `{name, description, input_schema}`, and the dispatch flow is identical to a normal tool. Constructors return ordinary `luft.ToolBinding`s:
 
 ~~~go
 bash := anthropic.BashTool(func(ctx context.Context, in json.RawMessage) (string, error) {
     // run the model's command in your sandbox of choice
 })
-toolset := gocode.Tools(bash).Wrap(gocode.WithConfirmation(promptUser))
+toolset := luft.Tools(bash).Wrap(luft.WithConfirmation(promptUser))
 ~~~
 
 Tools and `ProviderTool`s are tagged for one provider; passing them to a different one fails at request build with a clear error.
@@ -287,17 +287,17 @@ Tools and `ProviderTool`s are tagged for one provider; passing them to a differe
 
 ## Prompt caching
 
-Long, stable prompts (system instructions, tool definitions, big context blocks) can be cached so subsequent turns pay a fraction of the input-token cost. Caching is provider-specific in mechanism but exposed uniformly via `gocode.CacheControl`:
+Long, stable prompts (system instructions, tool definitions, big context blocks) can be cached so subsequent turns pay a fraction of the input-token cost. Caching is provider-specific in mechanism but exposed uniformly via `luft.CacheControl`:
 
 ~~~go
 // The most common pattern: cache the system prompt and the tool prefix
 // for any subsequent turn within the cache window.
-client, _ := gocode.New(gocode.Config{
+client, _ := luft.New(luft.Config{
     Provider:    provider,
-    Model:       gocode.ModelSonnet,
-    SystemCache: gocode.Ephemeral(),       // 5-minute TTL
+    Model:       luft.ModelSonnet,
+    SystemCache: luft.Ephemeral(),       // 5-minute TTL
 })
-toolset := gocode.Tools(...).CacheLast(gocode.Ephemeral())
+toolset := luft.Tools(...).CacheLast(luft.Ephemeral())
 ~~~
 
 Per-provider behavior:
@@ -309,7 +309,7 @@ Per-provider behavior:
 | `openai.Provider` | Automatic for prefixes ≥1024 tokens; no field needed | Markers ignored (dropped before send) |
 | `openai.ResponsesProvider` | Automatic, same as Chat Completions | Markers ignored |
 
-Use `gocode.EphemeralExtended()` for the 1-hour TTL when a prefix will be reused across long sessions.
+Use `luft.EphemeralExtended()` for the 1-hour TTL when a prefix will be reused across long sessions.
 
 `Usage` reports cache stats when the provider returns them — `CacheCreationTokens` (Anthropic only — tokens written to cache this turn) and `CacheReadTokens` (Anthropic and OpenAI/OpenRouter — tokens served from cache at a discount).
 
@@ -329,8 +329,8 @@ You choose the server, inspect the tools, and pass them in.
 ## Streaming
 
 ~~~go
-_, _, err := client.AskStream(ctx, system, history, func(delta gocode.ContentBlock) {
-    if delta.Type == gocode.TypeText {
+_, _, err := client.AskStream(ctx, system, history, func(delta luft.ContentBlock) {
+    if delta.Type == luft.TypeText {
         fmt.Print(delta.Text)
     }
 })
@@ -341,11 +341,11 @@ Use `LoopStream` or `Agent.StepStream` for streamed tool loops.
 Retries can restart a stream after partial output, so callbacks may see partial text from failed attempts. Use `StreamBuffer` with `RetryConfig.OnRetry` to react and clear:
 
 ~~~go
-sb := gocode.NewStreamBuffer(
-    func(b gocode.ContentBlock) { fmt.Print(b.Text) },
+sb := luft.NewStreamBuffer(
+    func(b luft.ContentBlock) { fmt.Print(b.Text) },
     func() { fmt.Print("\n[retrying…]\n") },
 )
-client, _ := gocode.New(gocode.Config{..., Retry: gocode.RetryConfig{OnRetry: sb.OnRetry}})
+client, _ := luft.New(luft.Config{..., Retry: luft.RetryConfig{OnRetry: sb.OnRetry}})
 msg, _, err := client.AskStream(ctx, system, history, sb.OnToken)
 ~~~
 
@@ -355,13 +355,13 @@ msg, _, err := client.AskStream(ctx, system, history, sb.OnToken)
 
 ~~~go
 sess, err := store.Get(ctx, sessionID)
-if errors.Is(err, gocode.ErrSessionNotFound) {
-    sess = &gocode.Session{ID: sessionID}
+if errors.Is(err, luft.ErrSessionNotFound) {
+    sess = &luft.Session{ID: sessionID}
 } else if err != nil {
     return err
 }
 
-sess.History = append(sess.History, gocode.NewUserMessage(input))
+sess.History = append(sess.History, luft.NewUserMessage(input))
 result, err := assistant.Step(ctx, sess.History)
 if err != nil {
     return err
@@ -392,11 +392,11 @@ type Store interface {
 ## Errors and retries
 
 ~~~go
-client, err := gocode.New(gocode.Config{
+client, err := luft.New(luft.Config{
     Provider:  provider,
-    Model:     gocode.ModelSonnet,
+    Model:     luft.ModelSonnet,
     MaxTokens: 4096,
-    Retry: gocode.RetryConfig{
+    Retry: luft.RetryConfig{
         MaxRetries:  5,
         InitialWait: time.Second,
         MaxWait:     30 * time.Second,

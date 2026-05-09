@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 // Usage records token consumption for one API call.
 //

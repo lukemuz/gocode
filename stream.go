@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import "time"
 
@@ -11,12 +11,12 @@ import "time"
 //
 // Wire StreamBuffer to a streaming call like this:
 //
-//	sb := gocode.NewStreamBuffer(
-//	    func(b gocode.ContentBlock) { fmt.Print(b.Text) }, // forward tokens live
+//	sb := luft.NewStreamBuffer(
+//	    func(b luft.ContentBlock) { fmt.Print(b.Text) }, // forward tokens live
 //	    func() { fmt.Print("\n[retrying…]\n") },          // reset partial output
 //	)
-//	cfg := gocode.RetryConfig{OnRetry: sb.OnRetry}
-//	client, _ := gocode.New(gocode.Config{..., Retry: cfg})
+//	cfg := luft.RetryConfig{OnRetry: sb.OnRetry}
+//	client, _ := luft.New(luft.Config{..., Retry: cfg})
 //	msg, err := client.AskStream(ctx, system, history, sb.OnToken)
 //
 // Either argument to NewStreamBuffer may be nil, in which case that half of the

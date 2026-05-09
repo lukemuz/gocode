@@ -1,14 +1,14 @@
-# `gocode` vs ADK
+# `luft` vs ADK
 
-A code-first comparison between `gocode` and Google's Agent Development Kit (ADK). Where ADK is the better fit, this document says so.
+A code-first comparison between `luft` and Google's Agent Development Kit (ADK). Where ADK is the better fit, this document says so.
 
 ## The short version
 
 ADK is a full agent application model: agents, runners, sessions, state, events, callbacks, artifact services, memory services, and managed deployment. It is comprehensive and opinionated.
 
-`gocode` is a small set of primitives — `Client`, `Provider`, `Message`, `Tool`, `Loop`, `Agent`, `Toolset`, `ContextManager`, `Session` — composed with ordinary Go.
+`luft` is a small set of primitives — `Client`, `Provider`, `Message`, `Tool`, `Loop`, `Agent`, `Toolset`, `ContextManager`, `Session` — composed with ordinary Go.
 
-| Concern | ADK | `gocode` |
+| Concern | ADK | `luft` |
 |---|---|---|
 | Time to first model call | medium | low |
 | Multi-tool agent | declarative | assemble a `Toolset` |
@@ -20,18 +20,18 @@ ADK is a full agent application model: agents, runners, sessions, state, events,
 | Managed deployment | yes (Vertex Agent Engine) | no |
 | Application-model lock-in | high | low |
 
-If you need live audio, hosted deployment, or vector-backed memory out of the box, pick ADK. If your service is in Go and you want agent code that reads like Go, pick `gocode`.
+If you need live audio, hosted deployment, or vector-backed memory out of the box, pick ADK. If your service is in Go and you want agent code that reads like Go, pick `luft`.
 
 ## Honest strengths and limits
 
-`gocode` is good at:
+`luft` is good at:
 
 - **Legibility.** History is `[]Message`; tools are functions; loops are visible. Reading the code tells you what runs.
 - **Explicit ownership.** Persistence, context trimming, retries, and the loop are caller-controlled. No service mutates state behind your back.
 - **Composition with existing Go.** No Python runtime adjacent to your service. The same client, store, and toolset slot into HTTP handlers, workers, and tests.
 - **Easy testing.** The `Provider` interface is the main seam. Tests run without network calls and assert contracts, not prose.
 
-`gocode` does not try to be:
+`luft` does not try to be:
 
 - a managed deployment story
 - a vector-backed memory layer
@@ -45,7 +45,7 @@ For any of those, ADK (or another framework) is the better fit.
 
 **Pick ADK when** you want Vertex Agent Engine deployment, bidirectional live audio/video, a built-in vector memory service, declarative agent configuration with strong defaults, or eval dashboards for non-engineer stakeholders.
 
-**Pick `gocode` when** your service is in Go, you want to debug agents by reading code, and you want explicit ownership of history, persistence, and the loop.
+**Pick `luft` when** your service is in Go, you want to debug agents by reading code, and you want explicit ownership of history, persistence, and the loop.
 
 ## Three worked comparisons
 
@@ -67,25 +67,25 @@ runner = Runner(agent=orchestrator, session_service=...)
 events = runner.run(session_id=session.id, new_message=...)
 ```
 
-**`gocode` shape.** A subagent is a `ToolFunc` that happens to call `Loop`. The parent's dispatch map *is* the routing mechanism.
+**`luft` shape.** A subagent is a `ToolFunc` that happens to call `Loop`. The parent's dispatch map *is* the routing mechanism.
 
 ```go
-researchTool, researchFn := gocode.NewTypedTool[input](
+researchTool, researchFn := luft.NewTypedTool[input](
     "research", "Delegate a research task.", schema,
     func(ctx context.Context, in input) (string, error) {
         r, err := cheap.Loop(ctx, researchSystem,
-            []gocode.Message{gocode.NewUserMessage(in.Task)},
+            []luft.Message{luft.NewUserMessage(in.Task)},
             researchTools, 8)
         return r.FinalText(), err
     },
 )
 
-orchestrator := gocode.Agent{
+orchestrator := luft.Agent{
     Client: smart, // smarter model than the specialists
     System: "Route research to research, drafting to write.",
-    Tools: gocode.Tools(
-        gocode.Bind(researchTool, researchFn),
-        gocode.Bind(writeTool, writeFn),
+    Tools: luft.Tools(
+        luft.Bind(researchTool, researchFn),
+        luft.Bind(writeTool, writeFn),
     ),
     MaxIter: 6,
 }
@@ -113,17 +113,17 @@ for event in runner.run(user_id="u-123", session_id="s-abc",
         print(event.content.parts[0].text)
 ```
 
-**`gocode` shape.** A session is plain data; persistence is a five-method `Store`; the whole turn is read-modify-write.
+**`luft` shape.** A session is plain data; persistence is a five-method `Store`; the whole turn is read-modify-write.
 
 ```go
 store, _ := stores.NewFileStore("./sessions")
 
 sess, err := store.Get(ctx, sessionID)
-if errors.Is(err, gocode.ErrSessionNotFound) {
-    sess = &gocode.Session{ID: sessionID}
+if errors.Is(err, luft.ErrSessionNotFound) {
+    sess = &luft.Session{ID: sessionID}
 }
 
-sess.History = append(sess.History, gocode.NewUserMessage(userInput))
+sess.History = append(sess.History, luft.NewUserMessage(userInput))
 result, err := assistant.Step(ctx, sess.History)
 if err != nil {
     return err // sess unchanged; retry is just calling again
@@ -137,7 +137,7 @@ if len(sess.History) == 1 {
 }
 ```
 
-You give up **built-in scope semantics for state** (ADK's `app:` / `user:` / `temp:` prefixes — in `gocode` you keep per-session data in `Session.State` and per-user data in your existing database) and a **managed Vertex backend**.
+You give up **built-in scope semantics for state** (ADK's `app:` / `user:` / `temp:` prefixes — in `luft` you keep per-session data in `Session.State` and per-user data in your existing database) and a **managed Vertex backend**.
 
 You get **no hidden mutation**, **trivial backend swap** (five-method interface), **failure atomicity** (nothing persists until you save, so a failed `Step` cannot corrupt the session), and **plain JSON on disk** that `cat`, `jq`, and diffs can read.
 
@@ -164,10 +164,10 @@ pipeline = SequentialAgent(name="pipeline", sub_agents=[fanout, compare])
 runner   = Runner(agent=pipeline, session_service=...)
 ```
 
-**`gocode` shape.** Fan-out is a goroutine helper; fan-in is a function call. The data flow is local variables, top to bottom.
+**`luft` shape.** Fan-out is a goroutine helper; fan-in is a function call. The data flow is local variables, top to bottom.
 
 ```go
-results := gocode.Parallel(ctx,
+results := luft.Parallel(ctx,
     func(ctx context.Context) (string, error) {
         return ask(ctx, client, "Summarize the rise of the Roman Empire ...")
     },
@@ -191,7 +191,7 @@ You get **visible data flow** (the comparison prompt's inputs are local variable
 
 Working version: [`examples/recipes/06-parallel-pipeline`](examples/recipes/06-parallel-pipeline).
 
-## What `gocode` will not become
+## What `luft` will not become
 
 To keep this comparison honest going forward, the core is committed to *not* adopting:
 

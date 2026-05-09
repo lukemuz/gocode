@@ -1,11 +1,11 @@
 # Quickstart
 
-`gocode` is a small Go library for LLM calls, tools, and agent loops. This guide gets you from zero to a model call to a tool loop. For the full reference see [`README.md`](README.md).
+`luft` is a small Go library for LLM calls, tools, and agent loops. This guide gets you from zero to a model call to a tool loop. For the full reference see [`README.md`](README.md).
 
 ## Install
 
 ~~~bash
-go get github.com/lukemuz/gocode
+go get github.com/lukemuz/luft
 export ANTHROPIC_API_KEY=sk-ant-...
 ~~~
 
@@ -21,20 +21,20 @@ import (
     "fmt"
     "log"
 
-    "github.com/lukemuz/gocode"
-    "github.com/lukemuz/gocode/providers/anthropic"
+    "github.com/lukemuz/luft"
+    "github.com/lukemuz/luft/providers/anthropic"
 )
 
 func main() {
     ctx := context.Background()
 
-    client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
+    client, err := anthropic.NewClientFromEnv(luft.ModelSonnet)
     if err != nil {
         log.Fatal(err)
     }
 
-    history := []gocode.Message{
-        gocode.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
+    history := []luft.Message{
+        luft.NewUserMessage("Give me three practical ideas for using LLMs in a Go service."),
     }
 
     reply, usage, err := client.Ask(ctx, "You are concise.", history)
@@ -42,7 +42,7 @@ func main() {
         log.Fatal(err)
     }
 
-    fmt.Println(gocode.TextContent(reply))
+    fmt.Println(luft.TextContent(reply))
     fmt.Printf("(%d in / %d out tokens)\n", usage.InputTokens, usage.OutputTokens)
 }
 ~~~
@@ -55,24 +55,24 @@ func main() {
 
 ~~~go
 history = append(history, reply)
-history = append(history, gocode.NewUserMessage("Pick the most practical idea."))
+history = append(history, luft.NewUserMessage("Pick the most practical idea."))
 reply, _, err = client.Ask(ctx, "You are concise.", history)
 ~~~
 
-That is the core data model: `[]gocode.Message` in, `gocode.Message` out.
+That is the core data model: `[]luft.Message` in, `luft.Message` out.
 
 ## 3. Add a tool
 
 A tool is a model-facing definition plus a Go function. The built-in clock tool is the smallest example:
 
 ~~~go
-import "github.com/lukemuz/gocode/tools/clock"
+import "github.com/lukemuz/luft/tools/clock"
 
 clockTool := clock.New()
 toolset := clockTool.Toolset()
 
-history := []gocode.Message{
-    gocode.NewUserMessage("What time is it? Then suggest one thing to work on next."),
+history := []luft.Message{
+    luft.NewUserMessage("What time is it? Then suggest one thing to work on next."),
 }
 
 result, err := client.Loop(ctx, "Use tools when they help.", history, toolset, 5)
@@ -93,13 +93,13 @@ type CalculatorInput struct {
     B         float64 `json:"b"`
 }
 
-calc, calcFn := gocode.NewTypedTool(
+calc, calcFn := luft.NewTypedTool(
     "calculator",
     "Do basic arithmetic.",
-    gocode.Object(
-        gocode.String("operation", "add, subtract, multiply", gocode.Required(), gocode.Enum("add", "subtract", "multiply")),
-        gocode.Number("a", "First number", gocode.Required()),
-        gocode.Number("b", "Second number", gocode.Required()),
+    luft.Object(
+        luft.String("operation", "add, subtract, multiply", luft.Required(), luft.Enum("add", "subtract", "multiply")),
+        luft.Number("a", "First number", luft.Required()),
+        luft.Number("b", "Second number", luft.Required()),
     ),
     func(ctx context.Context, in CalculatorInput) (string, error) {
         switch in.Operation {
@@ -115,24 +115,24 @@ calc, calcFn := gocode.NewTypedTool(
 Use it in a `Toolset`:
 
 ~~~go
-tools := gocode.Tools(gocode.Bind(calc, calcFn))
+tools := luft.Tools(luft.Bind(calc, calcFn))
 ~~~
 
 The model sees the schema; your handler receives a typed Go value; dispatch is a normal map. No reflection registry, no hidden runtime.
 
 ### Arrays and nested objects
 
-Use `gocode.Array` for list parameters and `gocode.ObjectOf` for nested object shapes:
+Use `luft.Array` for list parameters and `luft.ObjectOf` for nested object shapes:
 
 ~~~go
-schema := gocode.Object(
-    gocode.String("reasoning", "Why these subtasks cover the question"),
-    gocode.Array("subtasks", "List of sub-questions",
-        gocode.ObjectOf(
-            gocode.String("question", "Sub-question to research", gocode.Required()),
-            gocode.String("rationale", "Why this matters"),
+schema := luft.Object(
+    luft.String("reasoning", "Why these subtasks cover the question"),
+    luft.Array("subtasks", "List of sub-questions",
+        luft.ObjectOf(
+            luft.String("question", "Sub-question to research", luft.Required()),
+            luft.String("rationale", "Why this matters"),
         ),
-        gocode.Required()),
+        luft.Required()),
 )
 ~~~
 
@@ -140,7 +140,7 @@ schema := gocode.Object(
 
 ### Hand-rolled schemas (escape hatch)
 
-The builders cover ~95% of tool schemas. For the rest — `oneOf`, `$ref`, regex `pattern`, recursive types — `gocode.Tool.InputSchema` is `json.RawMessage`, so any valid JSON Schema works:
+The builders cover ~95% of tool schemas. For the rest — `oneOf`, `$ref`, regex `pattern`, recursive types — `luft.Tool.InputSchema` is `json.RawMessage`, so any valid JSON Schema works:
 
 ~~~go
 const mySchema = `{
@@ -151,14 +151,14 @@ const mySchema = `{
   "required": ["value"]
 }`
 
-tool := gocode.Tool{
+tool := luft.Tool{
     Name:        "store",
     Description: "Store a string or number",
     InputSchema: json.RawMessage(mySchema),
 }
 ~~~
 
-You can mix this with `gocode.TypedToolFunc` for the dispatch side; only the schema needs to be hand-rolled.
+You can mix this with `luft.TypedToolFunc` for the dispatch side; only the schema needs to be hand-rolled.
 
 ## 5. Compose built-ins and middleware
 
@@ -168,29 +168,29 @@ if err != nil {
     log.Fatal(err)
 }
 
-tools := gocode.MustJoin(clockTool.Toolset(), ws.Toolset()).Wrap(
-    gocode.WithTimeout(5*time.Second),
-    gocode.WithResultLimit(20_000),
+tools := luft.MustJoin(clockTool.Toolset(), ws.Toolset()).Wrap(
+    luft.WithTimeout(5*time.Second),
+    luft.WithResultLimit(20_000),
 )
 ~~~
 
-Use `workspace.NewReadOnly` for safe filesystem reads. `workspace.New` includes `edit_file` — wrap it with `gocode.WithConfirmation` before letting writes run.
+Use `workspace.NewReadOnly` for safe filesystem reads. `workspace.New` includes `edit_file` — wrap it with `luft.WithConfirmation` before letting writes run.
 
 ## 6. Use Agent when the glue repeats
 
 `Agent` bundles a client, system prompt, toolset, context manager, and iteration cap.
 
 ~~~go
-a := gocode.Agent{
+a := luft.Agent{
     Client:  client,
     System:  "You are a helpful assistant.",
     Tools:   tools,
-    Context: gocode.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+    Context: luft.ContextManager{MaxTokens: 8000, KeepRecent: 20},
     MaxIter: 10,
 }
 
 // One-shot autonomous task: pass a single user message with the goal.
-result, err := a.Step(ctx, []gocode.Message{gocode.NewUserMessage("do the thing")})
+result, err := a.Step(ctx, []luft.Message{luft.NewUserMessage("do the thing")})
 
 // Multi-turn: call Step once per human turn and thread history.
 result, err = a.Step(ctx, history)

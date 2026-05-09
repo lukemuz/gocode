@@ -11,4 +11,4 @@ Runnable patterns under `examples/recipes/`. Each recipe is ordinary Go that tie
 | 05 | [`05-persistent-chat`](examples/recipes/05-persistent-chat) | Long-running conversation with `FileStore` and context trimming |
 | 06 | [`06-parallel-pipeline`](examples/recipes/06-parallel-pipeline) | Parallel-then-sequential pipeline with `Parallel` and `Ask` |
 
-Each recipe directory has a `main.go` plus a `README.md` describing what it does, how to run it, and which `gocode` features it exercises.
+Each recipe directory has a `main.go` plus a `README.md` describing what it does, how to run it, and which `luft` features it exercises.

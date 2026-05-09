@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 const (
@@ -46,7 +46,7 @@ type openAIChatRequest struct {
 // Annotations is the raw annotations array some backends attach to assistant
 // messages (e.g. OpenRouter url_citation entries returned alongside hosted
 // web_search results). It is captured opaquely; fromOpenAIResponse turns
-// each entry into an opaque gocode.ContentBlock so callers can render
+// each entry into an opaque luft.ContentBlock so callers can render
 // citations without the library taking a dependency on a specific shape.
 type openAIMessage struct {
 	Role        string            `json:"role"`
@@ -61,10 +61,10 @@ type openAIMessage struct {
 // and the image_url part (Type=="image_url", ImageURL populated). cache_control
 // rides along on text parts when the canonical message marked them.
 type openAIContentPart struct {
-	Type         string                `json:"type"` // "text" or "image_url"
-	Text         string                `json:"text,omitempty"`
-	ImageURL     *openAIImageURL       `json:"image_url,omitempty"`
-	CacheControl *gocode.CacheControl  `json:"cache_control,omitempty"`
+	Type         string             `json:"type"` // "text" or "image_url"
+	Text         string             `json:"text,omitempty"`
+	ImageURL     *openAIImageURL    `json:"image_url,omitempty"`
+	CacheControl *luft.CacheControl `json:"cache_control,omitempty"`
 }
 
 // openAIImageURL is the value of an image_url content part. URL is either
@@ -102,7 +102,7 @@ type openAIToolDef struct {
 	} `json:"function"`
 	// CacheControl, when set, becomes a sibling field on the tool definition.
 	// Only emitted when the caller passes cacheCompatible=true (e.g. OpenRouter).
-	CacheControl *gocode.CacheControl `json:"cache_control,omitempty"`
+	CacheControl *luft.CacheControl `json:"cache_control,omitempty"`
 }
 
 type openAIChatResponse struct {
@@ -167,7 +167,7 @@ type openAIStreamChunk struct {
 // array so cache_control can attach to the right spot. When false (e.g.
 // OpenAI Chat Completions, which auto-caches and may reject unknown fields),
 // markers are dropped silently.
-func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages []gocode.Message, cacheCompatible bool) []openAIMessage {
+func toOpenAIMessages(system string, systemCache *luft.CacheControl, messages []luft.Message, cacheCompatible bool) []openAIMessage {
 	var out []openAIMessage
 
 	if system != "" {
@@ -176,11 +176,11 @@ func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages 
 
 	for _, msg := range messages {
 		switch msg.Role {
-		case gocode.RoleAssistant:
-			m := openAIMessage{Role: gocode.RoleAssistant}
+		case luft.RoleAssistant:
+			m := openAIMessage{Role: luft.RoleAssistant}
 			text, cache := joinTextBlocks(msg.Content)
 			for _, block := range msg.Content {
-				if block.Type != gocode.TypeToolUse {
+				if block.Type != luft.TypeToolUse {
 					continue
 				}
 				args := string(block.Input)
@@ -200,11 +200,11 @@ func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages 
 			}
 			out = append(out, m)
 
-		case gocode.RoleUser:
+		case luft.RoleUser:
 			// Separate tool_result blocks into individual tool-role messages;
 			// collect remaining text + image blocks into a single user message.
 			for _, block := range msg.Content {
-				if block.Type == gocode.TypeToolResult {
+				if block.Type == luft.TypeToolResult {
 					out = append(out, openAIMessage{
 						Role:       "tool",
 						ToolCallID: block.ToolUseID,
@@ -214,7 +214,7 @@ func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages 
 			}
 			if userContent, ok := buildUserContent(msg.Content, cacheCompatible); ok {
 				out = append(out, openAIMessage{
-					Role:    gocode.RoleUser,
+					Role:    luft.RoleUser,
 					Content: userContent,
 				})
 			}
@@ -230,10 +230,10 @@ func toOpenAIMessages(system string, systemCache *gocode.CacheControl, messages 
 // wireTextContent so backward-compat with the plain-string path is exact.
 // Returns (content, true) when a user message should be emitted, or
 // (nil, false) when there is nothing to send (e.g. tool_result-only turn).
-func buildUserContent(blocks []gocode.ContentBlock, cacheCompatible bool) (any, bool) {
+func buildUserContent(blocks []luft.ContentBlock, cacheCompatible bool) (any, bool) {
 	hasImage := false
 	for _, b := range blocks {
-		if b.Type == gocode.TypeImage {
+		if b.Type == luft.TypeImage {
 			hasImage = true
 			break
 		}
@@ -256,7 +256,7 @@ func buildUserContent(blocks []gocode.ContentBlock, cacheCompatible bool) (any, 
 		parts = append(parts, part)
 	}
 	for _, b := range blocks {
-		if b.Type != gocode.TypeImage {
+		if b.Type != luft.TypeImage {
 			continue
 		}
 		parts = append(parts, openAIContentPart{
@@ -274,11 +274,11 @@ func buildUserContent(blocks []gocode.ContentBlock, cacheCompatible bool) (any, 
 // the highest-precedence cache marker among them. If multiple text blocks
 // carry markers we keep the last one — for cumulative cache semantics the
 // later marker subsumes earlier ones at the same level.
-func joinTextBlocks(blocks []gocode.ContentBlock) (string, *gocode.CacheControl) {
+func joinTextBlocks(blocks []luft.ContentBlock) (string, *luft.CacheControl) {
 	var b strings.Builder
-	var cache *gocode.CacheControl
+	var cache *luft.CacheControl
 	for _, block := range blocks {
-		if block.Type != gocode.TypeText {
+		if block.Type != luft.TypeText {
 			continue
 		}
 		b.WriteString(block.Text)
@@ -292,7 +292,7 @@ func joinTextBlocks(blocks []gocode.ContentBlock) (string, *gocode.CacheControl)
 // wireTextContent picks the wire shape: plain string when no cache marker
 // applies (or the backend can't carry it), or a single-element typed-parts
 // array when we need to attach cache_control.
-func wireTextContent(text string, cache *gocode.CacheControl, cacheCompatible bool) any {
+func wireTextContent(text string, cache *luft.CacheControl, cacheCompatible bool) any {
 	if cache == nil || !cacheCompatible {
 		return text
 	}
@@ -318,9 +318,9 @@ func wireTextContent(text string, cache *gocode.CacheControl, cacheCompatible bo
 // cacheCompatible controls whether Tool.CacheControl markers are emitted as
 // a sibling cache_control field on the wire. False for stock OpenAI; true
 // for OpenRouter, which routes the marker to Anthropic backends.
-func toOpenAITools(tools []gocode.Tool, providerTools []gocode.ProviderTool, cacheCompatible, allowProviderTools bool) ([]json.RawMessage, error) {
+func toOpenAITools(tools []luft.Tool, providerTools []luft.ProviderTool, cacheCompatible, allowProviderTools bool) ([]json.RawMessage, error) {
 	if len(providerTools) > 0 && !allowProviderTools {
-		return nil, fmt.Errorf("gocode: openai (chat completions) does not support ProviderTools; use a Responses-API provider")
+		return nil, fmt.Errorf("luft: openai (chat completions) does not support ProviderTools; use a Responses-API provider")
 	}
 	if len(tools) == 0 && len(providerTools) == 0 {
 		return nil, nil
@@ -328,7 +328,7 @@ func toOpenAITools(tools []gocode.Tool, providerTools []gocode.ProviderTool, cac
 	out := make([]json.RawMessage, 0, len(tools)+len(providerTools))
 	for _, t := range tools {
 		if t.Provider != "" && t.Provider != "openai" {
-			return nil, fmt.Errorf("gocode: openai: tool %q is tagged for provider %q", t.Name, t.Provider)
+			return nil, fmt.Errorf("luft: openai: tool %q is tagged for provider %q", t.Name, t.Provider)
 		}
 		var td openAIToolDef
 		td.Type = "function"
@@ -340,13 +340,13 @@ func toOpenAITools(tools []gocode.Tool, providerTools []gocode.ProviderTool, cac
 		}
 		raw, err := json.Marshal(td)
 		if err != nil {
-			return nil, fmt.Errorf("gocode: marshal openai tool %q: %w", t.Name, err)
+			return nil, fmt.Errorf("luft: marshal openai tool %q: %w", t.Name, err)
 		}
 		out = append(out, raw)
 	}
 	for _, pt := range providerTools {
 		if len(pt.Raw) == 0 {
-			return nil, fmt.Errorf("gocode: openai: provider tool tagged %q has empty Raw body", pt.Provider)
+			return nil, fmt.Errorf("luft: openai: provider tool tagged %q has empty Raw body", pt.Provider)
 		}
 		out = append(out, pt.Raw)
 	}
@@ -367,18 +367,18 @@ func openAIFinishReason(reason string) string {
 	}
 }
 
-// fromOpenAIResponse converts an openAIChatResponse to a gocode.ProviderResponse.
-func fromOpenAIResponse(r openAIChatResponse) gocode.ProviderResponse {
+// fromOpenAIResponse converts an openAIChatResponse to a luft.ProviderResponse.
+func fromOpenAIResponse(r openAIChatResponse) luft.ProviderResponse {
 	if len(r.Choices) == 0 {
-		return gocode.ProviderResponse{}
+		return luft.ProviderResponse{}
 	}
 
 	choice := r.Choices[0]
-	var content []gocode.ContentBlock
+	var content []luft.ContentBlock
 
 	if text := messageContentString(choice.Message.Content); text != "" {
-		content = append(content, gocode.ContentBlock{
-			Type: gocode.TypeText,
+		content = append(content, luft.ContentBlock{
+			Type: luft.TypeText,
 			Text: text,
 		})
 	}
@@ -390,25 +390,25 @@ func fromOpenAIResponse(r openAIChatResponse) gocode.ProviderResponse {
 		if err := json.Unmarshal(ann, &head); err != nil || head.Type == "" {
 			continue
 		}
-		content = append(content, gocode.ContentBlock{
+		content = append(content, luft.ContentBlock{
 			Type: head.Type,
 			Raw:  append(json.RawMessage(nil), ann...),
 		})
 	}
 
 	for _, tc := range choice.Message.ToolCalls {
-		content = append(content, gocode.ContentBlock{
-			Type:  gocode.TypeToolUse,
+		content = append(content, luft.ContentBlock{
+			Type:  luft.TypeToolUse,
 			ID:    tc.ID,
 			Name:  tc.Function.Name,
 			Input: json.RawMessage(tc.Function.Arguments),
 		})
 	}
 
-	return gocode.ProviderResponse{
+	return luft.ProviderResponse{
 		Content:    content,
 		StopReason: openAIFinishReason(choice.FinishReason),
-		Usage: gocode.Usage{
+		Usage: luft.Usage{
 			InputTokens:     r.Usage.PromptTokens,
 			OutputTokens:    r.Usage.CompletionTokens,
 			CacheReadTokens: r.Usage.PromptTokensDetails.CachedTokens,
@@ -427,7 +427,7 @@ type Config struct {
 	HTTPClient *http.Client // defaults to a 60-second timeout client
 }
 
-// Provider implements gocode.Provider for the OpenAI Chat Completions API.
+// Provider implements luft.Provider for the OpenAI Chat Completions API.
 type Provider struct {
 	cfg Config
 }
@@ -435,7 +435,7 @@ type Provider struct {
 // NewProvider creates a Provider, filling in defaults.
 func NewProvider(cfg Config) (*Provider, error) {
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("gocode: Config.APIKey is required")
+		return nil, fmt.Errorf("luft: Config.APIKey is required")
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = openAIDefaultBaseURL
@@ -451,7 +451,7 @@ func NewProvider(cfg Config) (*Provider, error) {
 func NewProviderFromEnv() (*Provider, error) {
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
-		return nil, fmt.Errorf("gocode: OPENAI_API_KEY environment variable is not set")
+		return nil, fmt.Errorf("luft: OPENAI_API_KEY environment variable is not set")
 	}
 	return NewProvider(Config{APIKey: key})
 }
@@ -459,25 +459,25 @@ func NewProviderFromEnv() (*Provider, error) {
 // NewClientFromEnv creates a Client backed by the OpenAI provider, reading
 // the API key from OPENAI_API_KEY. model is the model identifier (e.g.
 // "gpt-4o", "gpt-4o-mini").
-func NewClientFromEnv(model string) (*gocode.Client, error) {
+func NewClientFromEnv(model string) (*luft.Client, error) {
 	provider, err := NewProviderFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return gocode.New(gocode.Config{Provider: provider, Model: model})
+	return luft.New(luft.Config{Provider: provider, Model: model})
 }
 
-// Call implements gocode.Provider for OpenAI Chat Completions. Cache markers
+// Call implements luft.Provider for OpenAI Chat Completions. Cache markers
 // in canonical types are dropped because OpenAI auto-caches and may validate
 // strictly against unknown fields. ProviderTools are rejected: stock OpenAI
 // hosts tools only via the Responses API.
-func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode.ProviderResponse, error) {
+func (p *Provider) Call(ctx context.Context, req luft.ProviderRequest) (luft.ProviderResponse, error) {
 	return CompatibleCall(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, false, false)
 }
 
-// Stream implements gocode.Provider.Stream by delegating to the shared
+// Stream implements luft.Provider.Stream by delegating to the shared
 // streaming helper (mirrors the Call pattern).
-func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDelta func(gocode.ContentBlock)) (gocode.ProviderResponse, error) {
+func (p *Provider) Stream(ctx context.Context, req luft.ProviderRequest, onDelta func(luft.ContentBlock)) (luft.ProviderResponse, error) {
 	return CompatibleStream(ctx, p.cfg.HTTPClient, p.cfg.APIKey, p.cfg.BaseURL+"/v1/chat/completions", req, onDelta, false, false)
 }
 
@@ -496,13 +496,13 @@ func CompatibleCall(
 	httpClient *http.Client,
 	apiKey string,
 	url string,
-	req gocode.ProviderRequest,
+	req luft.ProviderRequest,
 	cacheCompatible bool,
 	allowProviderTools bool,
-) (gocode.ProviderResponse, error) {
+) (luft.ProviderResponse, error) {
 	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible, allowProviderTools)
 	if err != nil {
-		return gocode.ProviderResponse{}, err
+		return luft.ProviderResponse{}, err
 	}
 	chatReq := openAIChatRequest{
 		Model:     req.Model,
@@ -513,26 +513,26 @@ func CompatibleCall(
 
 	body, err := json.Marshal(chatReq)
 	if err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: marshal openai request: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: marshal openai request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: build openai request: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: build openai request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: openai http: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: openai http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		var errBody openAIErrorBody
 		json.NewDecoder(resp.Body).Decode(&errBody) //nolint:errcheck
-		return gocode.ProviderResponse{}, &gocode.APIError{
+		return luft.ProviderResponse{}, &luft.APIError{
 			StatusCode: resp.StatusCode,
 			Type:       errBody.Error.Type,
 			Message:    errBody.Error.Message,
@@ -541,7 +541,7 @@ func CompatibleCall(
 
 	var chatResp openAIChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: decode openai response: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: decode openai response: %w", err)
 	}
 
 	return fromOpenAIResponse(chatResp), nil
@@ -553,7 +553,7 @@ func CompatibleCall(
 // parse "data: " JSON chunks (skipping "[DONE]"). It calls onDelta for each
 // text delta and each tool_call delta (accumulating arguments per index from
 // the deltas), accumulates full text and tool calls for the final
-// gocode.ProviderResponse.Content (mirroring fromOpenAIResponse logic), maps
+// luft.ProviderResponse.Content (mirroring fromOpenAIResponse logic), maps
 // finish_reason via openAIFinishReason and captures usage, then returns the
 // aggregated response (or a stream read error).
 func CompatibleStream(
@@ -561,14 +561,14 @@ func CompatibleStream(
 	httpClient *http.Client,
 	apiKey string,
 	url string,
-	req gocode.ProviderRequest,
-	onDelta func(gocode.ContentBlock),
+	req luft.ProviderRequest,
+	onDelta func(luft.ContentBlock),
 	cacheCompatible bool,
 	allowProviderTools bool,
-) (gocode.ProviderResponse, error) {
+) (luft.ProviderResponse, error) {
 	openaiTools, err := toOpenAITools(req.Tools, req.ProviderTools, cacheCompatible, allowProviderTools)
 	if err != nil {
-		return gocode.ProviderResponse{}, err
+		return luft.ProviderResponse{}, err
 	}
 	chatReq := openAIChatRequest{
 		Model:     req.Model,
@@ -580,12 +580,12 @@ func CompatibleStream(
 
 	body, err := json.Marshal(chatReq)
 	if err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: marshal openai stream request: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: marshal openai stream request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: build openai stream request: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: build openai stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
@@ -593,14 +593,14 @@ func CompatibleStream(
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: openai stream http: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: openai stream http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		var errBody openAIErrorBody
 		json.NewDecoder(resp.Body).Decode(&errBody) //nolint:errcheck
-		return gocode.ProviderResponse{}, &gocode.APIError{
+		return luft.ProviderResponse{}, &luft.APIError{
 			StatusCode: resp.StatusCode,
 			Type:       errBody.Error.Type,
 			Message:    errBody.Error.Message,
@@ -610,7 +610,7 @@ func CompatibleStream(
 	var fullText strings.Builder
 	toolCallAccum := make(map[int]openAIToolCall)
 	var stopReason string
-	var usage gocode.Usage
+	var usage luft.Usage
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -626,7 +626,7 @@ func CompatibleStream(
 		// Some providers embed error objects in the stream body even on HTTP 200.
 		var errCheck openAIErrorBody
 		if err := json.Unmarshal([]byte(data), &errCheck); err == nil && errCheck.Error.Message != "" {
-			return gocode.ProviderResponse{}, &gocode.APIError{Type: errCheck.Error.Type, Message: errCheck.Error.Message}
+			return luft.ProviderResponse{}, &luft.APIError{Type: errCheck.Error.Type, Message: errCheck.Error.Message}
 		}
 
 		var chunk openAIStreamChunk
@@ -648,8 +648,8 @@ func CompatibleStream(
 		if choice.Delta.Content != "" {
 			delta := choice.Delta.Content
 			fullText.WriteString(delta)
-			onDelta(gocode.ContentBlock{
-				Type: gocode.TypeText,
+			onDelta(luft.ContentBlock{
+				Type: luft.TypeText,
 				Text: delta,
 			})
 		}
@@ -671,8 +671,8 @@ func CompatibleStream(
 			}
 			toolCallAccum[idx] = tc
 
-			cb := gocode.ContentBlock{
-				Type: gocode.TypeToolUse,
+			cb := luft.ContentBlock{
+				Type: luft.TypeToolUse,
 				ID:   tc.ID,
 				Name: tc.Function.Name,
 			}
@@ -694,14 +694,14 @@ func CompatibleStream(
 	}
 
 	if err := scanner.Err(); err != nil {
-		return gocode.ProviderResponse{}, fmt.Errorf("gocode: openai stream read: %w", err)
+		return luft.ProviderResponse{}, fmt.Errorf("luft: openai stream read: %w", err)
 	}
 
 	// Build final content (mirrors fromOpenAIResponse).
-	var content []gocode.ContentBlock
+	var content []luft.ContentBlock
 	if fullText.Len() > 0 {
-		content = append(content, gocode.ContentBlock{
-			Type: gocode.TypeText,
+		content = append(content, luft.ContentBlock{
+			Type: luft.TypeText,
 			Text: fullText.String(),
 		})
 	}
@@ -710,8 +710,8 @@ func CompatibleStream(
 		if tc.Function.Arguments != "" {
 			input = json.RawMessage(tc.Function.Arguments)
 		}
-		content = append(content, gocode.ContentBlock{
-			Type:  gocode.TypeToolUse,
+		content = append(content, luft.ContentBlock{
+			Type:  luft.TypeToolUse,
 			ID:    tc.ID,
 			Name:  tc.Function.Name,
 			Input: input,
@@ -726,7 +726,7 @@ func CompatibleStream(
 		}
 	}
 
-	return gocode.ProviderResponse{
+	return luft.ProviderResponse{
 		Content:    content,
 		StopReason: stopReason,
 		Usage:      usage,

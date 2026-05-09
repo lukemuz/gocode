@@ -1,6 +1,6 @@
 // Recipe 06: parallel steps feeding a sequential step.
 //
-// Two model calls run concurrently via gocode.Parallel; their outputs are
+// Two model calls run concurrently via luft.Parallel; their outputs are
 // stitched into a single follow-up prompt. The "pipeline" is just Go control
 // flow — there is no graph runtime, no DAG type.
 package main
@@ -10,20 +10,20 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
 )
 
 func main() {
 	ctx := context.Background()
 
-	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(luft.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Fan out: summarize two subjects in parallel.
-	results := gocode.Parallel(ctx,
+	results := luft.Parallel(ctx,
 		func(ctx context.Context) (string, error) {
 			return ask(ctx, client, "Summarize the rise of the Roman Empire in two sentences.")
 		},
@@ -48,10 +48,10 @@ func main() {
 	fmt.Println(comparison)
 }
 
-func ask(ctx context.Context, client *gocode.Client, prompt string) (string, error) {
-	reply, _, err := client.Ask(ctx, "", []gocode.Message{gocode.NewUserMessage(prompt)})
+func ask(ctx context.Context, client *luft.Client, prompt string) (string, error) {
+	reply, _, err := client.Ask(ctx, "", []luft.Message{luft.NewUserMessage(prompt)})
 	if err != nil {
 		return "", err
 	}
-	return gocode.TextContent(reply), nil
+	return luft.TextContent(reply), nil
 }

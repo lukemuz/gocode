@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // ProviderTag identifies tools targeted at the OpenRouter provider.
@@ -30,13 +30,13 @@ type WebSearchOpts struct {
 	SearchPrompt string
 }
 
-// WebSearch returns a gocode.ProviderTool that advertises OpenRouter's
+// WebSearch returns a luft.ProviderTool that advertises OpenRouter's
 // hosted web_search tool to the model. The model decides when to invoke;
 // OpenRouter executes the search server-side and returns results to the
 // model with citations.
 //
 // Citations surface in the ProviderResponse.Content as opaque
-// gocode.ContentBlock entries with Type "url_citation" (the JSON shape
+// luft.ContentBlock entries with Type "url_citation" (the JSON shape
 // OpenRouter returns under each annotation). Inspect ContentBlock.Raw to
 // render them; the agent loop ignores them just like any other unknown
 // block type. Streaming citations are not yet surfaced; use Call (not
@@ -44,7 +44,7 @@ type WebSearchOpts struct {
 //
 // Pricing flows through the user's existing OpenRouter credits — no
 // separate API key is needed beyond the OpenRouter one.
-func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
+func WebSearch(opts WebSearchOpts) luft.ProviderTool {
 	body := map[string]any{
 		"type": "openrouter:web_search",
 	}
@@ -63,7 +63,7 @@ func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		panic(fmt.Errorf("gocode: openrouter: marshal web_search tool: %w", err))
+		panic(fmt.Errorf("luft: openrouter: marshal web_search tool: %w", err))
 	}
-	return gocode.ProviderTool{Provider: ProviderTag, Raw: raw}
+	return luft.ProviderTool{Provider: ProviderTag, Raw: raw}
 }

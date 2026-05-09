@@ -12,7 +12,7 @@
 //   - ModeStandard: an open shell with a deny-list of obviously dangerous
 //     patterns (rm -rf /, dd if=, curl|sh, sudo, fork bombs, writing to
 //     /etc or /dev/sd*). Bindings are marked RequiresConfirmation=true so
-//     callers should pair the toolset with gocode.WithConfirmation.
+//     callers should pair the toolset with luft.WithConfirmation.
 //
 //   - ModeUnrestricted: no command-level filtering. Only the timeout and
 //     output cap apply. RequiresConfirmation=true.
@@ -35,7 +35,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // Mode controls how strictly commands are filtered before execution.
@@ -97,7 +97,7 @@ type Tool struct {
 	cfg     Config
 	allow   map[string]struct{}
 	deny    []*regexp.Regexp
-	binding gocode.ToolBinding
+	binding luft.ToolBinding
 }
 
 // Default allowlist for ModeRestricted: read-only inspection commands.
@@ -163,9 +163,9 @@ func New(cfg Config) (*Tool, error) {
 	return t, nil
 }
 
-// Toolset returns a single-binding toolset suitable for gocode.Join.
-func (t *Tool) Toolset() gocode.Toolset {
-	return gocode.Tools(t.binding)
+// Toolset returns a single-binding toolset suitable for luft.Join.
+func (t *Tool) Toolset() luft.Toolset {
+	return luft.Tools(t.binding)
 }
 
 // TrainedHandler returns a ToolFunc with the input shape Anthropic's
@@ -173,7 +173,7 @@ func (t *Tool) Toolset() gocode.Toolset {
 // Pair with anthropic.BashTool to register a binding the model has been
 // post-trained on. The "restart" flag is acknowledged but a no-op — we
 // don't maintain a persistent shell session, so each invocation is fresh.
-func (t *Tool) TrainedHandler() gocode.ToolFunc {
+func (t *Tool) TrainedHandler() luft.ToolFunc {
 	return func(ctx context.Context, raw json.RawMessage) (string, error) {
 		var in struct {
 			Command string `json:"command"`
@@ -196,14 +196,14 @@ type bashInput struct {
 	Cwd     string `json:"cwd,omitempty"`
 }
 
-func (t *Tool) buildBinding() gocode.ToolBinding {
+func (t *Tool) buildBinding() luft.ToolBinding {
 	desc := bashDescription(t.cfg.Mode, t.cfg.Timeout)
-	tool, fn := gocode.NewTypedTool(
+	tool, fn := luft.NewTypedTool(
 		"bash",
 		desc,
-		gocode.InputSchema{
+		luft.InputSchema{
 			Type: "object",
-			Properties: map[string]gocode.SchemaProperty{
+			Properties: map[string]luft.SchemaProperty{
 				"command": {Type: "string", Description: "Shell command to execute via /bin/sh -c."},
 				"cwd":     {Type: "string", Description: "Optional working directory, relative to the workspace root."},
 			},
@@ -212,7 +212,7 @@ func (t *Tool) buildBinding() gocode.ToolBinding {
 		t.run,
 	)
 	requires := t.cfg.Mode != ModeRestricted
-	return gocode.ToolBinding{Tool: tool, Func: fn, Meta: gocode.ToolMetadata{RequiresConfirmation: requires}}
+	return luft.ToolBinding{Tool: tool, Func: fn, Meta: luft.ToolMetadata{RequiresConfirmation: requires}}
 }
 
 func bashDescription(mode Mode, timeout time.Duration) string {

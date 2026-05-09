@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -273,7 +273,7 @@ func TestSchema_ArrayOfScalars(t *testing.T) {
 
 func TestTypedToolFunc(t *testing.T) {
 	type input struct {
-		Op string `json:"op"`
+		Op  string `json:"op"`
 		Val int    `json:"val"`
 	}
 	fn := TypedToolFunc(func(_ context.Context, in input) (string, error) {
@@ -341,7 +341,9 @@ func TestTypedToolFunc(t *testing.T) {
 }
 
 func TestJSONResult(t *testing.T) {
-	type out struct{ Sum int `json:"sum"` }
+	type out struct {
+		Sum int `json:"sum"`
+	}
 	got, err := JSONResult(out{Sum: 7})
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +361,7 @@ func TestErrorTypes(t *testing.T) {
 			Message:    "too many requests",
 			RetryAfter: 10 * time.Second,
 		}
-		want := `gocode: API 429 (rate_limit_error): too many requests (retry after 10s)`
+		want := `luft: API 429 (rate_limit_error): too many requests (retry after 10s)`
 		if got := err.Error(); got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
@@ -597,7 +599,7 @@ func TestParallel(t *testing.T) {
 
 func TestRetryConfig_applyDefaults(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input RetryConfig
 		want  RetryConfig
 	}{
@@ -793,7 +795,7 @@ func TestCallWithRetry(t *testing.T) {
 		wantResp     bool
 	}{
 		{
-			name: "success on first try",
+			name:     "success on first try",
 			retryCfg: RetryConfig{},
 			fn: func() (ProviderResponse, error) {
 				return testResponse, nil
@@ -803,7 +805,7 @@ func TestCallWithRetry(t *testing.T) {
 			wantResp:     true,
 		},
 		{
-			name: "non-retryable 400 returns immediately",
+			name:     "non-retryable 400 returns immediately",
 			retryCfg: RetryConfig{},
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &APIError{StatusCode: 400, Message: "bad request"}
@@ -812,7 +814,7 @@ func TestCallWithRetry(t *testing.T) {
 			wantAttempts: 1,
 		},
 		{
-			name: "retryable 429 with exhaustion",
+			name:     "retryable 429 with exhaustion",
 			retryCfg: RetryConfig{MaxRetries: 1},
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &APIError{StatusCode: 429, Message: "rate limited"}
@@ -821,7 +823,7 @@ func TestCallWithRetry(t *testing.T) {
 			wantAttempts: 2,
 		},
 		{
-			name: "context canceled aborts immediately",
+			name:     "context canceled aborts immediately",
 			retryCfg: RetryConfig{},
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, context.Canceled
@@ -829,7 +831,7 @@ func TestCallWithRetry(t *testing.T) {
 			wantErr: context.Canceled,
 		},
 		{
-			name: "ErrMissingTool never retries",
+			name:     "ErrMissingTool never retries",
 			retryCfg: RetryConfig{},
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &ToolError{ToolName: "foo", Cause: ErrMissingTool}
@@ -837,7 +839,7 @@ func TestCallWithRetry(t *testing.T) {
 			wantErr: ErrMissingTool,
 		},
 		{
-			name: "disabled retry",
+			name:     "disabled retry",
 			retryCfg: RetryConfig{Disabled: true},
 			fn: func() (ProviderResponse, error) {
 				return ProviderResponse{}, &APIError{StatusCode: 503}

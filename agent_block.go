@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -57,20 +57,20 @@ type Hooks struct {
 //
 // Usage:
 //
-//	a := gocode.Agent{
+//	a := luft.Agent{
 //	    Client:  client,
 //	    System:  "You are a helpful assistant.",
 //	    Tools:   myToolset,
-//	    Context: gocode.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+//	    Context: luft.ContextManager{MaxTokens: 8000, KeepRecent: 20},
 //	    MaxIter: 10,
 //	}
 //
 //	// One-shot task: pass a single user message with the goal.
-//	result, err := a.Step(ctx, []gocode.Message{gocode.NewUserMessage("do the thing")})
+//	result, err := a.Step(ctx, []luft.Message{luft.NewUserMessage("do the thing")})
 //	fmt.Println(result.FinalText())
 //
 //	// Multi-turn: call Step once per human turn, threading history.
-//	history := []gocode.Message{gocode.NewUserMessage("first question")}
+//	history := []luft.Message{luft.NewUserMessage("first question")}
 //	result, err = a.Step(ctx, history)
 //	history = result.Messages
 type Agent struct {
@@ -107,7 +107,7 @@ type Agent struct {
 // for callers who want a different policy.
 func (a Agent) Step(ctx context.Context, history []Message) (LoopResult, error) {
 	if a.Client == nil {
-		return LoopResult{}, fmt.Errorf("gocode: Agent.Client is required")
+		return LoopResult{}, fmt.Errorf("luft: Agent.Client is required")
 	}
 
 	trimmed, err := a.Context.Trim(ctx, history)
@@ -151,7 +151,7 @@ func (a Agent) StepStream(
 	onToolResult func([]ToolResult),
 ) (LoopResult, error) {
 	if a.Client == nil {
-		return LoopResult{}, fmt.Errorf("gocode: Agent.Client is required")
+		return LoopResult{}, fmt.Errorf("luft: Agent.Client is required")
 	}
 	if onToken == nil {
 		onToken = func(ContentBlock) {}

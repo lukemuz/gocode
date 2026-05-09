@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
 )
 
 type ListDirInput struct {
@@ -25,11 +25,11 @@ func main() {
 	// NewTypedTool + schema builders (Object/String/Required) provide
 	// both Tool and ToolFunc with minimal boilerplate. Schema helpers
 	// are now implemented (see ROADMAP.md).
-	listDirTool, listDirFn := gocode.NewTypedTool[ListDirInput](
+	listDirTool, listDirFn := luft.NewTypedTool[ListDirInput](
 		"list_dir",
 		"List the files in a directory.",
-		gocode.Object(
-			gocode.String("path", "Path to the directory", gocode.Required()),
+		luft.Object(
+			luft.String("path", "Path to the directory", luft.Required()),
 		),
 		func(_ context.Context, in ListDirInput) (string, error) {
 			entries, err := os.ReadDir(in.Path)
@@ -40,15 +40,15 @@ func main() {
 			for i, e := range entries {
 				names[i] = e.Name()
 			}
-			return gocode.JSONResult(names)
+			return luft.JSONResult(names)
 		},
 	)
 
-	readFileTool, readFileFn := gocode.NewTypedTool[ReadFileInput](
+	readFileTool, readFileFn := luft.NewTypedTool[ReadFileInput](
 		"read_file",
 		"Read the contents of a file.",
-		gocode.Object(
-			gocode.String("path", "Path to the file", gocode.Required()),
+		luft.Object(
+			luft.String("path", "Path to the file", luft.Required()),
 		),
 		func(_ context.Context, in ReadFileInput) (string, error) {
 			data, err := os.ReadFile(in.Path)
@@ -59,26 +59,26 @@ func main() {
 		},
 	)
 
-	tools := gocode.Tools(
-		gocode.Bind(listDirTool, listDirFn),
-		gocode.Bind(readFileTool, readFileFn),
+	tools := luft.Tools(
+		luft.Bind(listDirTool, listDirFn),
+		luft.Bind(readFileTool, readFileFn),
 	)
 
 	provider, err := anthropic.NewProviderFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	client, err := gocode.New(gocode.Config{
+	client, err := luft.New(luft.Config{
 		Provider:  provider,
-		Model:     gocode.ModelSonnet,
+		Model:     luft.ModelSonnet,
 		MaxTokens: 2048,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	history := []gocode.Message{
-		gocode.NewUserMessage(
+	history := []luft.Message{
+		luft.NewUserMessage(
 			"List the files in the current directory, then read go.mod and tell me what Go version this project requires.",
 		),
 	}

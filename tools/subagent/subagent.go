@@ -25,7 +25,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // Config defines a subagent's wiring.
@@ -40,14 +40,14 @@ type Config struct {
 
 	// Client is the LLM client the subagent uses. Required. Typically
 	// derived from the parent client via WithModel for cost tiering.
-	Client *gocode.Client
+	Client *luft.Client
 
 	// System is the subagent's system prompt. Required.
 	System string
 
 	// Tools are the toolset available to the subagent. May be empty
 	// (e.g. for pure-text writer subagents).
-	Tools gocode.Toolset
+	Tools luft.Toolset
 
 	// MaxIter caps the subagent's loop. 0 means no limit. Recommend
 	// 4-12 for inspection subagents, 2-4 for writers.
@@ -57,19 +57,19 @@ type Config struct {
 // New returns a binding for the subagent tool. The schema is a fixed
 // {"task": string}. RequiresConfirmation is left false because the
 // subagent's own tools carry their own confirmation flags.
-func New(cfg Config) (gocode.ToolBinding, error) {
+func New(cfg Config) (luft.ToolBinding, error) {
 	if cfg.Name == "" || cfg.Description == "" || cfg.Client == nil || cfg.System == "" {
-		return gocode.ToolBinding{}, fmt.Errorf("subagent: Name, Description, Client and System are required")
+		return luft.ToolBinding{}, fmt.Errorf("subagent: Name, Description, Client and System are required")
 	}
 	type input struct {
 		Task string `json:"task"`
 	}
-	tool, fn := gocode.NewTypedTool[input](
+	tool, fn := luft.NewTypedTool[input](
 		cfg.Name,
 		cfg.Description,
-		gocode.InputSchema{
+		luft.InputSchema{
 			Type: "object",
-			Properties: map[string]gocode.SchemaProperty{
+			Properties: map[string]luft.SchemaProperty{
 				"task": {Type: "string", Description: "Self-contained task description for the subagent."},
 			},
 			Required: []string{"task"},
@@ -81,7 +81,7 @@ func New(cfg Config) (gocode.ToolBinding, error) {
 			result, err := cfg.Client.Loop(
 				ctx,
 				cfg.System,
-				[]gocode.Message{gocode.NewUserMessage(in.Task)},
+				[]luft.Message{luft.NewUserMessage(in.Task)},
 				cfg.Tools,
 				cfg.MaxIter,
 			)
@@ -98,16 +98,16 @@ func New(cfg Config) (gocode.ToolBinding, error) {
 			return text, nil
 		},
 	)
-	return gocode.ToolBinding{
+	return luft.ToolBinding{
 		Tool: tool,
 		Func: fn,
-		Meta: gocode.ToolMetadata{Source: "subagent/" + cfg.Name},
+		Meta: luft.ToolMetadata{Source: "subagent/" + cfg.Name},
 	}, nil
 }
 
-func lastText(r gocode.LoopResult) string {
+func lastText(r luft.LoopResult) string {
 	for i := len(r.Messages) - 1; i >= 0; i-- {
-		if t := gocode.TextContent(r.Messages[i]); t != "" {
+		if t := luft.TextContent(r.Messages[i]); t != "" {
 			return t
 		}
 	}

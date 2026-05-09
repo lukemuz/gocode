@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -16,7 +16,7 @@ const (
 // The struct is generic over T so Validate can take a typed argument without
 // the caller writing assertions. Most call sites pass a single literal:
 //
-//	gocode.Extract(ctx, client, system, history, gocode.ExtractParams[MyPlan]{
+//	luft.Extract(ctx, client, system, history, luft.ExtractParams[MyPlan]{
 //	    Description: "Submit the final plan",
 //	    Schema:      planSchema,
 //	})
@@ -75,7 +75,7 @@ func Extract[T any](
 ) (T, LoopResult, error) {
 	var captured T
 	if params.Description == "" {
-		return captured, LoopResult{}, fmt.Errorf("gocode: Extract: ExtractParams.Description is required")
+		return captured, LoopResult{}, fmt.Errorf("luft: Extract: ExtractParams.Description is required")
 	}
 
 	name := params.Name
@@ -109,7 +109,7 @@ func Extract[T any](
 
 	allTools, err := Join(params.Tools, Tools(submitBinding))
 	if err != nil {
-		return captured, LoopResult{}, fmt.Errorf("gocode: Extract: combine tools: %w", err)
+		return captured, LoopResult{}, fmt.Errorf("luft: Extract: combine tools: %w", err)
 	}
 
 	result, err := client.Loop(ctx, system, history, allTools, maxIter)
@@ -117,7 +117,7 @@ func Extract[T any](
 		return captured, result, err
 	}
 	if !submitted {
-		return captured, result, fmt.Errorf("gocode: Extract: model ended without calling %q", name)
+		return captured, result, fmt.Errorf("luft: Extract: model ended without calling %q", name)
 	}
 	return captured, result, nil
 }

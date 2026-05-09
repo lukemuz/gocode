@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"errors"
@@ -9,15 +9,15 @@ import (
 // Sentinel errors for use with errors.Is.
 var (
 	// ErrMaxIter is wrapped in a LoopError when Loop exhausts its iteration budget.
-	ErrMaxIter = errors.New("gocode: loop exceeded maxIter")
+	ErrMaxIter = errors.New("luft: loop exceeded maxIter")
 
 	// ErrMissingTool is wrapped in a ToolError when the model calls a tool
 	// that is not present in the dispatch map.
-	ErrMissingTool = errors.New("gocode: model called unknown tool")
+	ErrMissingTool = errors.New("luft: model called unknown tool")
 
 	// ErrRetryExhausted is wrapped in a RetryExhaustedError when all retry
 	// attempts have been consumed without a successful response.
-	ErrRetryExhausted = errors.New("gocode: retry exhausted")
+	ErrRetryExhausted = errors.New("luft: retry exhausted")
 )
 
 // APIError is returned when the LLM API responds with a non-2xx status.
@@ -31,7 +31,7 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	s := fmt.Sprintf("gocode: API %d (%s): %s", e.StatusCode, e.Type, e.Message)
+	s := fmt.Sprintf("luft: API %d (%s): %s", e.StatusCode, e.Type, e.Message)
 	if e.RetryAfter != 0 {
 		s += fmt.Sprintf(" (retry after %s)", e.RetryAfter)
 	}
@@ -48,7 +48,7 @@ type ToolError struct {
 }
 
 func (e *ToolError) Error() string {
-	return fmt.Sprintf("gocode: tool %q (%s): %s", e.ToolName, e.ToolUseID, e.Cause)
+	return fmt.Sprintf("luft: tool %q (%s): %s", e.ToolName, e.ToolUseID, e.Cause)
 }
 
 func (e *ToolError) Unwrap() error { return e.Cause }
@@ -61,7 +61,7 @@ type LoopError struct {
 }
 
 func (e *LoopError) Error() string {
-	return fmt.Sprintf("gocode: loop aborted at iteration %d: %s", e.Iter, e.Cause)
+	return fmt.Sprintf("luft: loop aborted at iteration %d: %s", e.Iter, e.Cause)
 }
 
 func (e *LoopError) Unwrap() error { return e.Cause }
@@ -76,7 +76,7 @@ type RetryExhaustedError struct {
 }
 
 func (e *RetryExhaustedError) Error() string {
-	return fmt.Sprintf("gocode: retry exhausted after %d attempt(s): %s", e.Attempts, e.Cause)
+	return fmt.Sprintf("luft: retry exhausted after %d attempt(s): %s", e.Attempts, e.Cause)
 }
 
 // Unwrap returns the last error that caused retries to be exhausted, enabling

@@ -1,6 +1,6 @@
 // Package mcp provides a client for the Model Context Protocol (MCP).
 // It connects to an MCP server over stdio, lists the tools it exposes,
-// and adapts them into ordinary gocode.Tool and gocode.ToolFunc values so
+// and adapts them into ordinary luft.Tool and luft.ToolFunc values so
 // they compose naturally with any Toolset or dispatch map.
 //
 // Usage:
@@ -32,7 +32,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // Config holds the parameters for connecting to an MCP server.
@@ -114,36 +114,36 @@ func (s *Server) Close() error {
 }
 
 // Toolset queries the MCP server for its tool list and returns an
-// gocode.Toolset containing one ToolBinding per MCP tool. Each binding's
+// luft.Toolset containing one ToolBinding per MCP tool. Each binding's
 // ToolFunc forwards calls to the MCP server via the tools/call method.
 // The returned Toolset is a snapshot; call Toolset again to refresh.
-func (s *Server) Toolset(ctx context.Context) (gocode.Toolset, error) {
+func (s *Server) Toolset(ctx context.Context) (luft.Toolset, error) {
 	resp, err := s.call(ctx, "tools/list", nil)
 	if err != nil {
-		return gocode.Toolset{}, fmt.Errorf("mcp: list tools: %w", err)
+		return luft.Toolset{}, fmt.Errorf("mcp: list tools: %w", err)
 	}
 
 	var payload struct {
 		Tools []mcpTool `json:"tools"`
 	}
 	if err := json.Unmarshal(resp, &payload); err != nil {
-		return gocode.Toolset{}, fmt.Errorf("mcp: decode tools/list response: %w", err)
+		return luft.Toolset{}, fmt.Errorf("mcp: decode tools/list response: %w", err)
 	}
 
-	bindings := make([]gocode.ToolBinding, 0, len(payload.Tools))
+	bindings := make([]luft.ToolBinding, 0, len(payload.Tools))
 	for _, mt := range payload.Tools {
 		t, err := mcpToolToAgent(mt)
 		if err != nil {
-			return gocode.Toolset{}, err
+			return luft.Toolset{}, err
 		}
 		fn := s.makeToolFunc(mt.Name)
-		bindings = append(bindings, gocode.ToolBinding{
+		bindings = append(bindings, luft.ToolBinding{
 			Tool: t,
 			Func: fn,
-			Meta: gocode.ToolMetadata{Source: "mcp"},
+			Meta: luft.ToolMetadata{Source: "mcp"},
 		})
 	}
-	return gocode.Toolset{Bindings: bindings}, nil
+	return luft.Toolset{Bindings: bindings}, nil
 }
 
 // mcpTool is the wire representation of an MCP tool from tools/list.
@@ -153,23 +153,23 @@ type mcpTool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-// mcpToolToAgent converts an MCP wire tool into a gocode.Tool.
+// mcpToolToAgent converts an MCP wire tool into a luft.Tool.
 // The inputSchema from MCP is already JSON Schema, so we pass it through
-// as raw bytes rather than re-serialising through gocode.InputSchema.
-func mcpToolToAgent(mt mcpTool) (gocode.Tool, error) {
+// as raw bytes rather than re-serialising through luft.InputSchema.
+func mcpToolToAgent(mt mcpTool) (luft.Tool, error) {
 	schema := mt.InputSchema
 	if len(schema) == 0 {
 		schema = json.RawMessage(`{"type":"object","properties":{}}`)
 	}
-	return gocode.Tool{
+	return luft.Tool{
 		Name:        mt.Name,
 		Description: mt.Description,
 		InputSchema: schema,
 	}, nil
 }
 
-// makeToolFunc returns a gocode.ToolFunc that calls the named MCP tool.
-func (s *Server) makeToolFunc(toolName string) gocode.ToolFunc {
+// makeToolFunc returns a luft.ToolFunc that calls the named MCP tool.
+func (s *Server) makeToolFunc(toolName string) luft.ToolFunc {
 	return func(ctx context.Context, input json.RawMessage) (string, error) {
 		params := map[string]interface{}{
 			"name":      toolName,
@@ -313,7 +313,7 @@ func (s *Server) initialize(ctx context.Context) error {
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]interface{}{},
 		"clientInfo": map[string]interface{}{
-			"name":    "gocode",
+			"name":    "luft",
 			"version": "0.1.2",
 		},
 	}

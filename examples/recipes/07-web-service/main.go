@@ -1,5 +1,5 @@
 // Recipe 07-web-service: the smallest deploy-shaped HTTP server that fronts
-// a gocode Agent. One file, plain net/http, no framework.
+// a luft Agent. One file, plain net/http, no framework.
 //
 //	POST /chat     — JSON in, JSON out
 //	GET  /healthz  — liveness probe
@@ -27,11 +27,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
-	"github.com/lukemuz/gocode/stores"
-	"github.com/lukemuz/gocode/tools/clock"
-	"github.com/lukemuz/gocode/tools/math"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
+	"github.com/lukemuz/luft/stores"
+	"github.com/lukemuz/luft/tools/clock"
+	"github.com/lukemuz/luft/tools/math"
 )
 
 // systemPrompt is the personality / instructions for your agent. Replace
@@ -40,7 +40,7 @@ import (
 const systemPrompt = "You are a helpful assistant. Use the clock and math tools when they would give a more accurate answer than guessing."
 
 func main() {
-	store, err := stores.NewFileStore(envOr("SESSIONS_DIR", filepath.Join(os.TempDir(), "gocode-web-sessions")))
+	store, err := stores.NewFileStore(envOr("SESSIONS_DIR", filepath.Join(os.TempDir(), "luft-web-sessions")))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,20 +50,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client, err := gocode.New(gocode.Config{
+	client, err := luft.New(luft.Config{
 		Provider:  provider,
-		Model:     gocode.ModelHaiku,
+		Model:     luft.ModelHaiku,
 		MaxTokens: 4096,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	assistant := gocode.Agent{
+	assistant := luft.Agent{
 		Client:  client,
 		System:  systemPrompt,
-		Tools:   gocode.MustJoin(clock.New().Toolset(), math.New().Toolset()),
-		Context: gocode.ContextManager{MaxTokens: 8000, KeepRecent: 20},
+		Tools:   luft.MustJoin(clock.New().Toolset(), math.New().Toolset()),
+		Context: luft.ContextManager{MaxTokens: 8000, KeepRecent: 20},
 		MaxIter: 6,
 	}
 
@@ -87,9 +87,9 @@ type chatResponse struct {
 	Reply     string `json:"reply"`
 }
 
-// chatHandler is the one place where the gocode pattern lives:
+// chatHandler is the one place where the luft pattern lives:
 // load session → append user message → Step → save session → return reply.
-func chatHandler(assistant gocode.Agent, store gocode.Store) http.HandlerFunc {
+func chatHandler(assistant luft.Agent, store luft.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req chatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -101,13 +101,13 @@ func chatHandler(assistant gocode.Agent, store gocode.Store) http.HandlerFunc {
 			return
 		}
 
-		sess, err := gocode.Load(r.Context(), store, req.SessionID)
+		sess, err := luft.Load(r.Context(), store, req.SessionID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err)
 			return
 		}
 
-		sess.History = append(sess.History, gocode.NewUserMessage(req.Message))
+		sess.History = append(sess.History, luft.NewUserMessage(req.Message))
 		result, err := assistant.Step(r.Context(), sess.History)
 		if err != nil {
 			writeJSONError(w, http.StatusBadGateway, err)
@@ -115,7 +115,7 @@ func chatHandler(assistant gocode.Agent, store gocode.Store) http.HandlerFunc {
 		}
 		sess.History = result.Messages
 
-		if err := gocode.Save(r.Context(), store, sess); err != nil {
+		if err := luft.Save(r.Context(), store, sess); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err)
 			return
 		}

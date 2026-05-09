@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 func TestWebSearchEmptyOptsOmitsParameters(t *testing.T) {
@@ -51,10 +51,10 @@ func TestProviderSplicesWebSearchIntoRequest(t *testing.T) {
 	srv, cap := newCaptureServer(t)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "anthropic/claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("what's new in go 1.24?")},
-		ProviderTools: []gocode.ProviderTool{
+		Messages: []luft.Message{luft.NewUserMessage("what's new in go 1.24?")},
+		ProviderTools: []luft.ProviderTool{
 			WebSearch(WebSearchOpts{MaxResults: 5}),
 		},
 	})
@@ -90,10 +90,10 @@ func TestProviderRejectsForeignProviderTag(t *testing.T) {
 	srv, _ := newCaptureServer(t)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "anthropic/claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{{
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{{
 			Provider: "anthropic",
 			Raw:      json.RawMessage(`{"type":"web_search_20260209","name":"web_search"}`),
 		}},

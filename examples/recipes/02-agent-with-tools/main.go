@@ -22,11 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
-	"github.com/lukemuz/gocode/tools/clock"
-	"github.com/lukemuz/gocode/tools/math"
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
+	"github.com/lukemuz/luft/tools/clock"
+	"github.com/lukemuz/luft/tools/math"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
 func main() {
@@ -47,9 +47,9 @@ func main() {
 	// with an OnRetry callback (wired into RetryConfig). When a retry happens
 	// mid-stream, the buffer clears partial output before the next attempt
 	// starts so the user doesn't see duplicated tokens.
-	sb := gocode.NewStreamBuffer(
-		func(b gocode.ContentBlock) {
-			if b.Type == gocode.TypeText {
+	sb := luft.NewStreamBuffer(
+		func(b luft.ContentBlock) {
+			if b.Type == luft.TypeText {
 				fmt.Print(b.Text)
 			}
 		},
@@ -61,11 +61,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	client, err := gocode.New(gocode.Config{
+	client, err := luft.New(luft.Config{
 		Provider:  provider,
-		Model:     gocode.ModelSonnet,
+		Model:     luft.ModelSonnet,
 		MaxTokens: 4096,
-		Retry: gocode.RetryConfig{
+		Retry: luft.RetryConfig{
 			MaxRetries:  3,
 			InitialWait: time.Second,
 			MaxWait:     10 * time.Second,
@@ -78,7 +78,7 @@ func main() {
 
 	// 3. Curated toolset.
 	//
-	// Built-ins composed with gocode.Join, then wrapped with three middlewares
+	// Built-ins composed with luft.Join, then wrapped with three middlewares
 	// applied to every tool: a 5-second timeout per call, a 16 KiB cap on
 	// tool output (so a chatty tool can't blow out the context window), and
 	// structured logging at Info level. The order of Wrap arguments is
@@ -87,14 +87,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	tools := gocode.MustJoin(
+	tools := luft.MustJoin(
 		clock.New().Toolset(),
 		math.New().Toolset(),
 		ws.Toolset(),
 	).Wrap(
-		gocode.WithLogging(logger),
-		gocode.WithTimeout(5*time.Second),
-		gocode.WithResultLimit(16*1024),
+		luft.WithLogging(logger),
+		luft.WithTimeout(5*time.Second),
+		luft.WithResultLimit(16*1024),
 	)
 
 	// 4. Context management.
@@ -103,14 +103,14 @@ func main() {
 	// budget), but configuring it now keeps the recipe honest about what a
 	// real long-running agent needs. KeepFirst pins the user's original
 	// task; KeepRecent always preserves the recent tool cycle.
-	cm := gocode.ContextManager{
+	cm := luft.ContextManager{
 		MaxTokens:  16000,
 		KeepFirst:  1,
 		KeepRecent: 20,
 	}
 
 	// 5. Agent assembly.
-	a := gocode.Agent{
+	a := luft.Agent{
 		Client:  client,
 		System:  "You are a concise helper. Use your tools when they would give a more accurate answer than guessing.",
 		Tools:   tools,
@@ -119,10 +119,10 @@ func main() {
 	}
 
 	// 6. One streamed step.
-	history := []gocode.Message{gocode.NewUserMessage(question)}
+	history := []luft.Message{luft.NewUserMessage(question)}
 	result, err := a.StepStream(ctx, history,
 		sb.OnToken,
-		func(results []gocode.ToolResult) {
+		func(results []luft.ToolResult) {
 			// Tool results are not part of the model's stream; surface them
 			// on stderr so the user can see what the agent did.
 			for _, r := range results {

@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 // State holds arbitrary caller-owned metadata encoded as JSON values. Use the
 // SetState and GetState helpers to read and write typed values:
 //
-//	gocode.SetState(sess, "user_id", "u-123")
-//	gocode.SetState(sess, "turn", 7)
+//	luft.SetState(sess, "user_id", "u-123")
+//	luft.SetState(sess, "turn", 7)
 //
-//	id, _ := gocode.GetState[string](sess, "user_id")
-//	turn, _ := gocode.GetState[int](sess, "turn")
+//	id, _ := luft.GetState[string](sess, "user_id")
+//	turn, _ := luft.GetState[int](sess, "turn")
 //
 // Using json.RawMessage as the value type means State survives JSON
 // round-trips without type loss — MemoryStore and FileStore behave
@@ -29,20 +29,20 @@ import (
 // Typical usage:
 //
 //	sess, err := store.Get(ctx, id)
-//	if errors.Is(err, gocode.ErrSessionNotFound) {
-//	    sess = &gocode.Session{ID: id}
+//	if errors.Is(err, luft.ErrSessionNotFound) {
+//	    sess = &luft.Session{ID: id}
 //	} else if err != nil {
 //	    return err
 //	}
 //
-//	sess.History = append(sess.History, gocode.NewUserMessage(input))
+//	sess.History = append(sess.History, luft.NewUserMessage(input))
 //	result, err := assistant.Step(ctx, sess.History)
 //	if err != nil {
 //	    return err
 //	}
 //	sess.History = result.Messages
 //
-//	return gocode.Save(ctx, store, sess) // creates or updates as needed
+//	return luft.Save(ctx, store, sess) // creates or updates as needed
 type Session struct {
 	ID      string                     `json:"id"`
 	History []Message                  `json:"history,omitempty"`
@@ -59,7 +59,7 @@ type Session struct {
 func SetState[T any](s *Session, key string, val T) error {
 	data, err := json.Marshal(val)
 	if err != nil {
-		return fmt.Errorf("gocode: SetState %q: %w", key, err)
+		return fmt.Errorf("luft: SetState %q: %w", key, err)
 	}
 	if s.State == nil {
 		s.State = make(map[string]json.RawMessage)
@@ -75,11 +75,11 @@ func GetState[T any](s *Session, key string) (T, error) {
 	var zero T
 	data, ok := s.State[key]
 	if !ok {
-		return zero, fmt.Errorf("gocode: GetState: key %q not found", key)
+		return zero, fmt.Errorf("luft: GetState: key %q not found", key)
 	}
 	var v T
 	if err := json.Unmarshal(data, &v); err != nil {
-		return zero, fmt.Errorf("gocode: GetState %q: %w", key, err)
+		return zero, fmt.Errorf("luft: GetState %q: %w", key, err)
 	}
 	return v, nil
 }
@@ -144,11 +144,11 @@ func Load(ctx context.Context, store Store, id string) (*Session, error) {
 var (
 	// ErrSessionNotFound is returned by Get, Update, and Delete when no
 	// session with the requested ID exists.
-	ErrSessionNotFound = errors.New("gocode: session not found")
+	ErrSessionNotFound = errors.New("luft: session not found")
 
 	// ErrSessionExists is returned by Create when a session with the given
 	// ID already exists.
-	ErrSessionExists = errors.New("gocode: session already exists")
+	ErrSessionExists = errors.New("luft: session already exists")
 )
 
 // SessionNotFound returns an error that wraps ErrSessionNotFound with the

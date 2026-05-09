@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -64,9 +64,9 @@ type Toolset struct {
 // Tools is a variadic constructor for a Toolset. It is the most ergonomic
 // way to build a small toolset literally:
 //
-//	tools := gocode.Tools(
-//	    gocode.Bind(searchTool, searchFn),
-//	    gocode.Bind(submitTool, submitFn),
+//	tools := luft.Tools(
+//	    luft.Bind(searchTool, searchFn),
+//	    luft.Bind(submitTool, submitFn),
 //	)
 //
 // Equivalent to Toolset{Bindings: []ToolBinding{...}}.
@@ -139,7 +139,7 @@ func Join(sets ...Toolset) (Toolset, error) {
 	for _, s := range sets {
 		for _, b := range s.Bindings {
 			if seen[b.Tool.Name] {
-				return Toolset{}, fmt.Errorf("gocode: duplicate tool name %q in toolset", b.Tool.Name)
+				return Toolset{}, fmt.Errorf("luft: duplicate tool name %q in toolset", b.Tool.Name)
 			}
 			seen[b.Tool.Name] = true
 			result.Bindings = append(result.Bindings, b)

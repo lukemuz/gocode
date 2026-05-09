@@ -1,6 +1,6 @@
 # Vision
 
-`gocode` is a Go library for LLM calls, tools, and agent loops. It scales from a one-off model call to practical tool-using assistants without forcing the assistant shape onto the one-off call.
+`luft` is a Go library for LLM calls, tools, and agent loops. It scales from a one-off model call to practical tool-using assistants without forcing the assistant shape onto the one-off call.
 
 > Easy things easy. Hard things possible. Nothing hidden.
 >
@@ -10,7 +10,7 @@
 
 Most agent frameworks optimize for the fully-loaded case — agents, runners, sessions, callbacks, memory services, graph runtimes. Once you accept the application model, hard things get easier. The price is that simple things pay the same setup cost as complex ones.
 
-`gocode` aims for a smoother complexity curve: a one-off call should not require an agent object, a useful assistant should not require rewriting the same glue, and a production system should not require fighting hidden ownership.
+`luft` aims for a smoother complexity curve: a one-off call should not require an agent object, a useful assistant should not require rewriting the same glue, and a production system should not require fighting hidden ownership.
 
 ## What the promise means in code
 
@@ -32,7 +32,7 @@ Each layer should be useful on its own. No layer should force concepts from a la
 
 ## Good convenience vs bad abstraction
 
-`gocode` is not allergic to convenience — it is allergic to loss of control.
+`luft` is not allergic to convenience — it is allergic to loss of control.
 
 A good helper compresses repetitive glue, has obvious behavior, exposes the primitives underneath, fails visibly, and could be rewritten by the user in ordinary Go. A bad one hides model calls, tool execution, memory mutation, or persistence, requires global registration, or owns application lifecycle.
 

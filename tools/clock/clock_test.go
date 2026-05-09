@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukemuz/gocode/tools/clock"
+	"github.com/lukemuz/luft/tools/clock"
 )
 
 func TestClockToolName(t *testing.T) {

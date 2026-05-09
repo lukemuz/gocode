@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"bytes"
@@ -311,4 +311,3 @@ func (p *fnProvider) Call(ctx context.Context, req ProviderRequest) (ProviderRes
 func (p *fnProvider) Stream(ctx context.Context, req ProviderRequest, onDelta func(ContentBlock)) (ProviderResponse, error) {
 	return p.call(ctx, req)
 }
-

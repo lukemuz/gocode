@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // minimalPNG is a 1×1 PNG used to exercise the image branch without
@@ -33,7 +33,7 @@ func TestFetchImageAttachesAndReturnsMetadata(t *testing.T) {
 	defer srv.Close()
 
 	f := New(Config{})
-	ctx, drain := gocode.WithImageSink(context.Background())
+	ctx, drain := luft.WithImageSink(context.Background())
 	out, err := f.handle(ctx, fetchInput{URL: srv.URL})
 	if err != nil {
 		t.Fatalf("handle: %v", err)
@@ -68,7 +68,7 @@ func TestFetchHTMLDoesNotAttachImage(t *testing.T) {
 	defer srv.Close()
 
 	f := New(Config{})
-	ctx, drain := gocode.WithImageSink(context.Background())
+	ctx, drain := luft.WithImageSink(context.Background())
 	if _, err := f.handle(ctx, fetchInput{URL: srv.URL}); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestFetchImageRespectsRawFlag(t *testing.T) {
 	defer srv.Close()
 
 	f := New(Config{})
-	ctx, drain := gocode.WithImageSink(context.Background())
+	ctx, drain := luft.WithImageSink(context.Background())
 	out, err := f.handle(ctx, fetchInput{URL: srv.URL, Raw: true})
 	if err != nil {
 		t.Fatalf("handle: %v", err)

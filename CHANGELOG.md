@@ -9,18 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Image content blocks. New `gocode.TypeImage` constant; `ContentBlock`
+- Image content blocks. New `luft.TypeImage` constant; `ContentBlock`
   gained `Source` (base64 data URI or http(s) URL) and `MediaType` fields.
   Image blocks round-trip as typed fields, not via `Raw`.
-- `gocode.ImageBlock` helper struct and `gocode.NewUserMessageWithImages(text, images)`
+- `luft.ImageBlock` helper struct and `luft.NewUserMessageWithImages(text, images)`
   constructor for emitting user-role turns that carry one text block followed
   by image blocks.
-- `gocode.ToolResult.Images []ImageBlock` for tools that emit image
+- `luft.ToolResult.Images []ImageBlock` for tools that emit image
   attachments. `NewToolResultMessage` flattens images from every tool result
   onto the same canonical user-role message alongside the existing
   `tool_result` blocks; the OpenAI wire serializer splits them into a
   sibling `role:"user"` message at send time.
-- `gocode.AttachImage(ctx, ImageBlock)` for ToolFuncs to ride image bytes
+- `luft.AttachImage(ctx, ImageBlock)` for ToolFuncs to ride image bytes
   back to the model alongside their textual output. The agent loop installs
   a per-call sink and drains it onto `ToolResult.Images`. `WithImageSink`
   exposes the same primitive for unit-testing image-emitting tools without
@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `providers/openrouter` now supports OpenRouter's hosted server-side tools.
-  `openrouter.WebSearch(opts)` constructs a `gocode.ProviderTool` for the
+  `openrouter.WebSearch(opts)` constructs a `luft.ProviderTool` for the
   `openrouter:web_search` hosted tool; the model decides when to invoke and
   OpenRouter executes the search server-side.
 - `openrouter.ProviderTag` constant ("openrouter") for tagging hosted tools;
@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other providers at request build time.
 - Citation surfacing on OpenAI-compatible `Call`: when a backend (e.g.
   OpenRouter web search) attaches `annotations` to the assistant message,
-  each entry is emitted as an opaque `gocode.ContentBlock` (Type set from
+  each entry is emitted as an opaque `luft.ContentBlock` (Type set from
   the annotation's `type`, full JSON in `Raw`). Streaming citations are
   not yet surfaced.
 
@@ -137,7 +137,7 @@ module version.
 - `mcp` package adapts Model Context Protocol servers into ordinary
   toolsets via `mcp.Connect` / `Server.Toolset`.
 
-### CLI (`cmd/gocode`)
+### CLI (`cmd/luft`)
 
 - Multi-agent CLI coding assistant on OpenRouter:
   - main agent (`x-ai/grok-4.3` by default) with read-only workspace
@@ -149,13 +149,13 @@ module version.
 - Flags: `-dir`, `-model`, `-explore-model`, `-plan-model`,
   `-no-subagents`, `-no-fetch`, `-bash`, `-yes`, `-max-iter`, `-log`,
   `-version`.
-- Env-var fallbacks: `GOCODE_MODEL`, `GOCODE_EXPLORE_MODEL`,
-  `GOCODE_PLAN_MODEL`, `GOCODE_SUMMARIZE_MODEL`.
+- Env-var fallbacks: `LUFT_MODEL`, `LUFT_EXPLORE_MODEL`,
+  `LUFT_PLAN_MODEL`, `LUFT_SUMMARIZE_MODEL`.
 - REPL with `:exit`, `:reset`, `:tokens`, `:help`, plus `/compact`
   for summarising history mid-session.
 - Unified-diff preview in edit confirmation prompts.
 - Optional JSONL session log (`-log auto` writes under
-  `~/.config/gocode/sessions/`).
+  `~/.config/luft/sessions/`).
 - Project memory: `AGENTS.md` and `CLAUDE.md` from the workspace and
-  user-level (`~/.config/gocode/AGENTS.md`, `~/.claude/CLAUDE.md`) are
+  user-level (`~/.config/luft/AGENTS.md`, `~/.claude/CLAUDE.md`) are
   appended to the system prompt.
