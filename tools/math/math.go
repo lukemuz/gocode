@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // Calculator is a safe read-only tool for basic arithmetic.
@@ -18,15 +18,15 @@ import (
 //	calc := math.New()
 //
 //	// Direct field access:
-//	tools := []gocode.Tool{calc.Tool}
-//	dispatch := map[string]gocode.ToolFunc{calc.Tool.Name: calc.Func}
+//	tools := []luft.Tool{calc.Tool}
+//	dispatch := map[string]luft.ToolFunc{calc.Tool.Name: calc.Func}
 //
 //	// Or via Toolset:
 //	toolset := calc.Toolset()
 type Calculator struct {
-	Tool gocode.Tool
-	Func gocode.ToolFunc
-	Meta gocode.ToolMetadata
+	Tool luft.Tool
+	Func luft.ToolFunc
+	Meta luft.ToolMetadata
 }
 
 type input struct {
@@ -37,21 +37,21 @@ type input struct {
 
 // New creates a Calculator tool ready for use.
 func New() *Calculator {
-	tool := gocode.NewTool(
+	tool := luft.NewTool(
 		"calculator",
 		"Performs basic arithmetic. Supported operations: add, subtract, multiply, divide.",
-		gocode.Object(
-			gocode.String("operation", "Arithmetic operation to perform.",
-				gocode.Required(),
-				gocode.Enum("add", "subtract", "multiply", "divide"),
+		luft.Object(
+			luft.String("operation", "Arithmetic operation to perform.",
+				luft.Required(),
+				luft.Enum("add", "subtract", "multiply", "divide"),
 			),
-			gocode.Number("a", "First operand.", gocode.Required()),
-			gocode.Number("b", "Second operand.", gocode.Required()),
+			luft.Number("a", "First operand.", luft.Required()),
+			luft.Number("b", "Second operand.", luft.Required()),
 		),
 	)
 	c := &Calculator{
 		Tool: tool,
-		Func: gocode.TypedToolFunc(func(_ context.Context, in input) (string, error) {
+		Func: luft.TypedToolFunc(func(_ context.Context, in input) (string, error) {
 			var result float64
 			switch in.Operation {
 			case "add":
@@ -73,7 +73,7 @@ func New() *Calculator {
 			}
 			return fmt.Sprintf("%g", result), nil
 		}),
-		Meta: gocode.ToolMetadata{
+		Meta: luft.ToolMetadata{
 			Source:   "tools/math",
 			ReadOnly: true,
 		},
@@ -81,10 +81,10 @@ func New() *Calculator {
 	return c
 }
 
-// Toolset returns a single-binding Toolset for use with gocode.Join.
-func (c *Calculator) Toolset() gocode.Toolset {
-	return gocode.Toolset{
-		Bindings: []gocode.ToolBinding{
+// Toolset returns a single-binding Toolset for use with luft.Join.
+func (c *Calculator) Toolset() luft.Toolset {
+	return luft.Toolset{
+		Bindings: []luft.ToolBinding{
 			{Tool: c.Tool, Func: c.Func, Meta: c.Meta},
 		},
 	}

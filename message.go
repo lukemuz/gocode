@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"encoding/json"
@@ -43,7 +43,7 @@ type ContentBlock struct {
 	// Image fields. Populated when Type=="image". Source is either a
 	// base64 data URI ("data:image/png;base64,...") or an http(s) URL;
 	// MediaType is the IANA media type ("image/png", "image/jpeg", ...).
-	// Caller is responsible for pre-encoding bytes; gocode does not
+	// Caller is responsible for pre-encoding bytes; luft does not
 	// downsample or re-encode.
 	Source    string `json:"source,omitempty"`
 	MediaType string `json:"media_type,omitempty"`

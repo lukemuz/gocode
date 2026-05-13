@@ -1,6 +1,6 @@
 # Recipe 01-minimal: smallest tool-using agent
 
-Baseline recipe: how short can a useful tool-using agent be in `gocode`
+Baseline recipe: how short can a useful tool-using agent be in `luft`
 using primitives alone? No streaming, no middleware, no context manager,
 no `Agent` block. Just `Client` + tools + `Loop`.
 
@@ -21,13 +21,13 @@ Recipe `01-agent-with-tools` shows what a *production-shaped* agent
 looks like (retries, streaming, middleware, context management); this
 recipe shows what a *minimal* agent looks like with the same library.
 
-If you're new to `gocode`, read this one first. Read the production
+If you're new to `luft`, read this one first. Read the production
 recipe second to see what each layer adds.
 
 ## Library features exercised
 
-- `gocode.NewAnthropicClientFromEnv`
-- `gocode.Client.Loop`
-- `gocode.Join`, `gocode.Toolset`
-- `gocode.NewUserMessage`, `gocode.TextContent`
+- `luft.NewAnthropicClientFromEnv`
+- `luft.Client.Loop`
+- `luft.Join`, `luft.Toolset`
+- `luft.NewUserMessage`, `luft.TextContent`
 - Built-ins: `tools/clock`, `tools/math`

@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 // CacheControl marks a content block, tool definition, or system prompt as
 // a cache breakpoint. The semantics are Anthropic's: caching is cumulative —

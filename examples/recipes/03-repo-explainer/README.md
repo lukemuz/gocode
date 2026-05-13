@@ -7,7 +7,7 @@ recipe likely to be useful as a tool in its own right.
 
 Builds on recipe 02 by adding the three things 02 deliberately omitted:
 
-- **Persistent sessions** via `gocode.FileStore` — repeated invocations with
+- **Persistent sessions** via `luft.FileStore` — repeated invocations with
   the same `-session` ID continue the conversation across runs
 - **Summarization with a cheaper model** — the `ContextManager.Summarizer`
   is wired to `cheap.Ask` (Haiku) so older turns compress when the smart
@@ -39,13 +39,13 @@ Sessions are stored under `~/.repo-explainer/<id>.json`.
 
 ## Library features exercised
 
-- `gocode.FileStore`, `gocode.Session`, `gocode.Save`, `gocode.Load`,
-  `gocode.ErrSessionNotFound`
-- `gocode.ContextManager` with a real `Summarizer`
-- `gocode.RenderForSummary` to flatten message history for the summarizer
+- `luft.FileStore`, `luft.Session`, `luft.Save`, `luft.Load`,
+  `luft.ErrSessionNotFound`
+- `luft.ContextManager` with a real `Summarizer`
+- `luft.RenderForSummary` to flatten message history for the summarizer
 - `Client.WithModel` for cheap-summarizer cost-tiering
-- `gocode.Agent.StepStream`
-- `gocode.NewStreamBuffer` paired with `RetryConfig.OnRetry`
-- `gocode.MustJoin`, `Toolset.Wrap` with three middlewares
-- `gocode.WithLogging`, `WithTimeout`, `WithResultLimit`
+- `luft.Agent.StepStream`
+- `luft.NewStreamBuffer` paired with `RetryConfig.OnRetry`
+- `luft.MustJoin`, `Toolset.Wrap` with three middlewares
+- `luft.WithLogging`, `WithTimeout`, `WithResultLimit`
 - Built-ins: `tools/clock`, `tools/workspace` (read-only)

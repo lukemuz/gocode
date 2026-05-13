@@ -14,7 +14,7 @@ import (
 //     Codex, Cursor, Aider, etc.)
 //  2. <workspace>/CLAUDE.md           (Claude Code's flavour — read for
 //     compatibility with existing repos)
-//  3. ~/.config/gocode/AGENTS.md      (user-level, gocode-specific)
+//  3. ~/.config/luft/AGENTS.md      (user-level, luft-specific)
 //  4. ~/.claude/CLAUDE.md             (user-level, picked up so Claude
 //     Code users can share their memory)
 //
@@ -34,7 +34,7 @@ func loadProjectMemory(workspaceDir string) string {
 	}
 	if home != "" {
 		candidates = append(candidates,
-			src{"user ~/.config/gocode/AGENTS.md", filepath.Join(home, ".config", "gocode", "AGENTS.md")},
+			src{"user ~/.config/luft/AGENTS.md", filepath.Join(home, ".config", "luft", "AGENTS.md")},
 			src{"user ~/.claude/CLAUDE.md", filepath.Join(home, ".claude", "CLAUDE.md")},
 		)
 	}

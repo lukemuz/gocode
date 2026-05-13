@@ -29,11 +29,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/stores"
-	"github.com/lukemuz/gocode/providers/anthropic"
-	"github.com/lukemuz/gocode/tools/clock"
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
+	"github.com/lukemuz/luft/stores"
+	"github.com/lukemuz/luft/tools/clock"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
 func main() {
@@ -51,9 +51,9 @@ func main() {
 
 	// 1. Streaming with retry awareness, set up before client construction
 	// so RetryConfig.OnRetry can clear partial output between attempts.
-	sb := gocode.NewStreamBuffer(
-		func(b gocode.ContentBlock) {
-			if b.Type == gocode.TypeText {
+	sb := luft.NewStreamBuffer(
+		func(b luft.ContentBlock) {
+			if b.Type == luft.TypeText {
 				fmt.Print(b.Text)
 			}
 		},
@@ -63,16 +63,16 @@ func main() {
 	// 2. Two clients: smart for the agent loop, cheap for the summarizer.
 	//
 	// Both wrap the same provider. Constructing two Client values is the
-	// cost-tiering pattern made trivial by gocode's stateless Client design.
+	// cost-tiering pattern made trivial by luft's stateless Client design.
 	provider, err := anthropic.NewProviderFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	smart, err := gocode.New(gocode.Config{
+	smart, err := luft.New(luft.Config{
 		Provider:  provider,
-		Model:     gocode.ModelSonnet,
+		Model:     luft.ModelSonnet,
 		MaxTokens: 4096,
-		Retry: gocode.RetryConfig{
+		Retry: luft.RetryConfig{
 			MaxRetries:  3,
 			InitialWait: time.Second,
 			MaxWait:     10 * time.Second,
@@ -82,7 +82,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cheap := smart.WithModel(gocode.ModelHaiku)
+	cheap := smart.WithModel(luft.ModelHaiku)
 
 	// 2. Toolset: clock + read-only workspace sandboxed to -repo, with
 	// per-tool middleware for safety and observability.
@@ -90,10 +90,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	tools := gocode.MustJoin(clock.New().Toolset(), ws.Toolset()).Wrap(
-		gocode.WithLogging(logger),
-		gocode.WithTimeout(10*time.Second),
-		gocode.WithResultLimit(32*1024),
+	tools := luft.MustJoin(clock.New().Toolset(), ws.Toolset()).Wrap(
+		luft.WithLogging(logger),
+		luft.WithTimeout(10*time.Second),
+		luft.WithResultLimit(32*1024),
 	)
 
 	// 3. Context management with a real summarizer.
@@ -103,29 +103,29 @@ func main() {
 	// trimming becomes lossy drop-only. The Summarizer signature takes the
 	// trim zone and returns a string that becomes a single user message in
 	// the trimmed history.
-	cm := gocode.ContextManager{
+	cm := luft.ContextManager{
 		MaxTokens:  24000,
 		KeepFirst:  1,  // the user's original question
 		KeepRecent: 12, // recent turns and their tool cycles
-		Summarizer: func(sctx context.Context, trimmed []gocode.Message) (string, error) {
-			rendered := gocode.RenderForSummary(trimmed, 0)
+		Summarizer: func(sctx context.Context, trimmed []luft.Message) (string, error) {
+			rendered := luft.RenderForSummary(trimmed, 0)
 			reply, _, err := cheap.Ask(sctx,
 				"You compress earlier portions of an investigation transcript. "+
 					"Preserve every concrete fact: file paths, line numbers, function "+
 					"names, tool outputs the assistant relied on, and conclusions reached.",
-				[]gocode.Message{gocode.NewUserMessage(
+				[]luft.Message{luft.NewUserMessage(
 					"Summarize the following transcript in 4-8 sentences. " +
 						"Be specific. Do not invent.\n\n" + rendered)},
 			)
 			if err != nil {
 				return "", err
 			}
-			return "[summary of earlier turns] " + gocode.TextContent(reply), nil
+			return "[summary of earlier turns] " + luft.TextContent(reply), nil
 		},
 	}
 
 	// 4. Agent assembly.
-	a := gocode.Agent{
+	a := luft.Agent{
 		Client: smart,
 		System: "You are a code archaeologist. Use your tools to investigate the " +
 			"repository before answering. Cite specific files and line numbers. " +
@@ -136,8 +136,8 @@ func main() {
 	}
 
 	// 5. Session: load if -session, append the new user turn, run, persist.
-	var store gocode.Store
-	sess := &gocode.Session{}
+	var store luft.Store
+	sess := &luft.Session{}
 	if *sessionID != "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -147,17 +147,17 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		sess, err = gocode.Load(ctx, store, *sessionID)
+		sess, err = luft.Load(ctx, store, *sessionID)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
-	sess.History = append(sess.History, gocode.NewUserMessage(question))
+	sess.History = append(sess.History, luft.NewUserMessage(question))
 
 	// 6. Streamed step.
 	result, err := a.StepStream(ctx, sess.History,
 		sb.OnToken,
-		func(results []gocode.ToolResult) {
+		func(results []luft.ToolResult) {
 			for _, r := range results {
 				status := "ok"
 				if r.IsError {
@@ -175,7 +175,7 @@ func main() {
 	// 7. Persist updated history if a session was requested.
 	sess.History = result.Messages
 	if store != nil {
-		if err := gocode.Save(ctx, store, sess); err != nil {
+		if err := luft.Save(ctx, store, sess); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Fprintf(os.Stderr, "session %s: %d messages saved\n", sess.ID, len(sess.History))
@@ -183,4 +183,3 @@ func main() {
 	fmt.Fprintf(os.Stderr, "tokens: %d in, %d out\n",
 		result.Usage.InputTokens, result.Usage.OutputTokens)
 }
-

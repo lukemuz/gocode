@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
 // TestGlobDoubleStar exercises the new ** support and verifies that

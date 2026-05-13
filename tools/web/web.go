@@ -6,7 +6,7 @@
 // Safety guards: http/https only, configurable timeout, body size cap, and
 // redirect limit. There is no host allow/deny list — operators who need to
 // keep the agent off internal networks should run with `-bash restricted`
-// and consider running gocode itself in a sandbox.
+// and consider running luft itself in a sandbox.
 package web
 
 import (
@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 const (
@@ -30,7 +30,7 @@ const (
 	defaultMaxBodyBytes = 5 << 20 // 5 MiB
 	defaultMaxRedirects = 5
 	defaultMaxLength    = 8000
-	defaultUserAgent    = "gocode-web-fetch/1.0 (+https://github.com/lukemuz/gocode)"
+	defaultUserAgent    = "luft-web-fetch/1.0 (+https://github.com/lukemuz/luft)"
 )
 
 // Config controls Fetcher behaviour. Zero values pick sensible defaults.
@@ -82,10 +82,10 @@ func New(cfg Config) *Fetcher {
 }
 
 // Toolset returns a single-binding toolset registering web_fetch.
-func (f *Fetcher) Toolset() gocode.Toolset {
-	schema := gocode.InputSchema{
+func (f *Fetcher) Toolset() luft.Toolset {
+	schema := luft.InputSchema{
 		Type: "object",
-		Properties: map[string]gocode.SchemaProperty{
+		Properties: map[string]luft.SchemaProperty{
 			"url":         {Type: "string", Description: "Absolute http or https URL to fetch."},
 			"max_length":  {Type: "integer", Description: "Maximum number of characters of body text to return (default 8000). The response indicates whether more content is available; paginate with start_index."},
 			"start_index": {Type: "integer", Description: "0-indexed character offset into the (post-conversion) body. Use to page through long pages."},
@@ -94,8 +94,8 @@ func (f *Fetcher) Toolset() gocode.Toolset {
 		Required: []string{"url"},
 	}
 	desc := "Fetch a URL over http(s) and return its content as text. HTML is converted to a plain-text approximation (script/style stripped, entities decoded, whitespace collapsed). Long pages are paginated via max_length + start_index. Set raw=true for non-HTML content (JSON, plaintext, etc.). When the response is an image (image/* content type), the text payload is a one-line metadata summary and the image bytes are attached to the result so the model receives them as visual content."
-	tool, fn := gocode.NewTypedTool("web_fetch", desc, schema, f.handle)
-	return gocode.Tools(gocode.ToolBinding{Tool: tool, Func: fn, Meta: gocode.ToolMetadata{RequiresConfirmation: false}})
+	tool, fn := luft.NewTypedTool("web_fetch", desc, schema, f.handle)
+	return luft.Tools(luft.ToolBinding{Tool: tool, Func: fn, Meta: luft.ToolMetadata{RequiresConfirmation: false}})
 }
 
 type fetchInput struct {
@@ -154,7 +154,7 @@ func (f *Fetcher) handle(ctx context.Context, in fetchInput) (string, error) {
 		if truncated {
 			return "", fmt.Errorf("web_fetch: image %s exceeds %d byte cap", u.String(), f.maxBody)
 		}
-		gocode.AttachImage(ctx, gocode.ImageBlock{
+		luft.AttachImage(ctx, luft.ImageBlock{
 			Source:    "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(body),
 			MediaType: mime,
 		})

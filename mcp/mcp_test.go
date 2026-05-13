@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/lukemuz/gocode/mcp"
+	"github.com/lukemuz/luft/mcp"
 )
 
 // fakeServerPath builds and returns the path to the fake MCP server binary.

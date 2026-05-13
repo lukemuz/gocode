@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 func testServerForStream(t *testing.T, lines []string) *httptest.Server {
@@ -34,9 +34,9 @@ func TestProvider_Stream(t *testing.T) {
 	tests := []struct {
 		name           string
 		streamLines    []string
-		wantDeltas     []gocode.ContentBlock
+		wantDeltas     []luft.ContentBlock
 		wantStopReason string
-		wantUsage      gocode.Usage
+		wantUsage      luft.Usage
 		wantErr        string
 	}{
 		{
@@ -49,12 +49,12 @@ func TestProvider_Stream(t *testing.T) {
 				`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 				`data: [DONE]`,
 			},
-			wantDeltas: []gocode.ContentBlock{
-				{Type: gocode.TypeText, Text: "Hello"},
-				{Type: gocode.TypeText, Text: " world"},
+			wantDeltas: []luft.ContentBlock{
+				{Type: luft.TypeText, Text: "Hello"},
+				{Type: luft.TypeText, Text: " world"},
 			},
 			wantStopReason: "end_turn",
-			wantUsage:      gocode.Usage{InputTokens: 10, OutputTokens: 5},
+			wantUsage:      luft.Usage{InputTokens: 10, OutputTokens: 5},
 		},
 		{
 			name: "tool use with partial_json",
@@ -66,13 +66,13 @@ func TestProvider_Stream(t *testing.T) {
 				`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
 				`data: [DONE]`,
 			},
-			wantDeltas: []gocode.ContentBlock{
-				{Type: gocode.TypeToolUse, ID: "tu_123", Name: "calculator"},
-				{Type: gocode.TypeToolUse, ID: "tu_123", Name: "calculator", Input: json.RawMessage(`{"op":"add"`)},
-				{Type: gocode.TypeToolUse, ID: "tu_123", Name: "calculator", Input: json.RawMessage(`{"op":"add","num":42}`)},
+			wantDeltas: []luft.ContentBlock{
+				{Type: luft.TypeToolUse, ID: "tu_123", Name: "calculator"},
+				{Type: luft.TypeToolUse, ID: "tu_123", Name: "calculator", Input: json.RawMessage(`{"op":"add"`)},
+				{Type: luft.TypeToolUse, ID: "tu_123", Name: "calculator", Input: json.RawMessage(`{"op":"add","num":42}`)},
 			},
 			wantStopReason: "tool_use",
-			wantUsage:      gocode.Usage{OutputTokens: 8},
+			wantUsage:      luft.Usage{OutputTokens: 8},
 		},
 		{
 			name: "error status",
@@ -96,14 +96,14 @@ func TestProvider_Stream(t *testing.T) {
 				},
 			}
 
-			var gotDeltas []gocode.ContentBlock
-			onDelta := func(b gocode.ContentBlock) {
+			var gotDeltas []luft.ContentBlock
+			onDelta := func(b luft.ContentBlock) {
 				gotDeltas = append(gotDeltas, b)
 			}
 
-			req := gocode.ProviderRequest{
-				Model:    gocode.ModelSonnet,
-				Messages: []gocode.Message{gocode.NewUserMessage("ping")},
+			req := luft.ProviderRequest{
+				Model:    luft.ModelSonnet,
+				Messages: []luft.Message{luft.NewUserMessage("ping")},
 			}
 			resp, err := p.Stream(context.Background(), req, onDelta)
 
@@ -153,11 +153,11 @@ func TestProvider_ErrorHandling(t *testing.T) {
 		},
 	}
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{Model: "test"})
+	_, err := p.Call(context.Background(), luft.ProviderRequest{Model: "test"})
 	if err == nil {
 		t.Fatal("expected APIError")
 	}
-	var apiErr *gocode.APIError
+	var apiErr *luft.APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 {
 		t.Errorf("expected *APIError(429), got %T: %v", err, err)
 	}

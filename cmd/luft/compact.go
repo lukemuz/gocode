@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 const compactSystemPrompt = `You are summarizing a coding-agent conversation so it can be continued in a fresh context window. The summary REPLACES the earlier turns — the assistant must be able to pick up from your summary alone.
@@ -50,23 +50,23 @@ Be specific and concrete. Cite paths. This summary is the only thing the next as
 // even on long histories.
 func compact(
 	ctx context.Context,
-	summarizer *gocode.Client,
-	history []gocode.Message,
+	summarizer *luft.Client,
+	history []luft.Message,
 	keepRecentTurns int,
 	extraInstructions string,
-) ([]gocode.Message, gocode.Usage, error) {
+) ([]luft.Message, luft.Usage, error) {
 	if keepRecentTurns < 1 {
 		keepRecentTurns = 1
 	}
 	cut := findCutPoint(history, keepRecentTurns)
 	if cut <= 0 {
 		// Nothing to compact — fewer turns than the keep target.
-		return history, gocode.Usage{}, nil
+		return history, luft.Usage{}, nil
 	}
 
 	transcript := renderTranscript(history[:cut])
 	if strings.TrimSpace(transcript) == "" {
-		return history, gocode.Usage{}, nil
+		return history, luft.Usage{}, nil
 	}
 
 	system := compactSystemPrompt
@@ -74,21 +74,21 @@ func compact(
 		system += "\n\nAdditional user-supplied instructions for this compaction:\n" + s
 	}
 
-	userTurn := gocode.NewUserMessage("Summarize the following conversation transcript:\n\n" + transcript)
-	resp, usage, err := summarizer.Ask(ctx, system, []gocode.Message{userTurn})
+	userTurn := luft.NewUserMessage("Summarize the following conversation transcript:\n\n" + transcript)
+	resp, usage, err := summarizer.Ask(ctx, system, []luft.Message{userTurn})
 	if err != nil {
 		return history, usage, fmt.Errorf("compact: summarizer: %w", err)
 	}
 
-	summary := gocode.TextContent(resp)
+	summary := luft.TextContent(resp)
 	if strings.TrimSpace(summary) == "" {
 		return history, usage, fmt.Errorf("compact: summarizer returned empty text")
 	}
 
-	synthetic := gocode.NewUserMessage(
+	synthetic := luft.NewUserMessage(
 		"[Compacted summary of the earlier conversation; the assistant should continue from here.]\n\n" + summary,
 	)
-	out := make([]gocode.Message, 0, 1+(len(history)-cut))
+	out := make([]luft.Message, 0, 1+(len(history)-cut))
 	out = append(out, synthetic)
 	out = append(out, history[cut:]...)
 	return out, usage, nil
@@ -101,22 +101,22 @@ func compact(
 // A "user-typed" message is a Role==user message that contains a text
 // block but no tool_result blocks — i.e., the user actually typed it,
 // it isn't a synthetic tool-results turn from the loop.
-func findCutPoint(history []gocode.Message, keepRecent int) int {
+func findCutPoint(history []luft.Message, keepRecent int) int {
 	if len(history) == 0 || keepRecent <= 0 {
 		return 0
 	}
 	var userTurnIdx []int
 	for i, m := range history {
-		if m.Role != gocode.RoleUser {
+		if m.Role != luft.RoleUser {
 			continue
 		}
 		isToolResults := false
 		hasText := false
 		for _, b := range m.Content {
-			if b.Type == gocode.TypeToolResult {
+			if b.Type == luft.TypeToolResult {
 				isToolResults = true
 			}
-			if b.Type == gocode.TypeText && strings.TrimSpace(b.Text) != "" {
+			if b.Type == luft.TypeText && strings.TrimSpace(b.Text) != "" {
 				hasText = true
 			}
 		}
@@ -135,28 +135,28 @@ func findCutPoint(history []gocode.Message, keepRecent int) int {
 // transcript suitable for feeding to the summarizer. Tool calls and
 // results are rendered as compact bracketed annotations rather than
 // raw JSON to keep the summary call cheap.
-func renderTranscript(history []gocode.Message) string {
+func renderTranscript(history []luft.Message) string {
 	var b strings.Builder
 	for _, m := range history {
 		role := m.Role
 		switch role {
-		case gocode.RoleUser:
+		case luft.RoleUser:
 			fmt.Fprintf(&b, "\n## user\n")
-		case gocode.RoleAssistant:
+		case luft.RoleAssistant:
 			fmt.Fprintf(&b, "\n## assistant\n")
 		default:
 			fmt.Fprintf(&b, "\n## %s\n", role)
 		}
 		for _, blk := range m.Content {
 			switch blk.Type {
-			case gocode.TypeText:
+			case luft.TypeText:
 				if t := strings.TrimSpace(blk.Text); t != "" {
 					b.WriteString(t)
 					b.WriteString("\n")
 				}
-			case gocode.TypeToolUse:
+			case luft.TypeToolUse:
 				fmt.Fprintf(&b, "[tool_use %s id=%s input=%s]\n", blk.Name, blk.ID, truncateForTranscript(string(blk.Input), 500))
-			case gocode.TypeToolResult:
+			case luft.TypeToolResult:
 				fmt.Fprintf(&b, "[tool_result id=%s]\n%s\n", blk.ToolUseID, truncateForTranscript(blk.Content, 1500))
 			}
 		}

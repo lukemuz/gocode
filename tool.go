@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -110,7 +110,7 @@ func TypedToolFunc[Input any](f func(context.Context, Input) (string, error)) To
 		}
 		var in Input
 		if err := json.Unmarshal(input, &in); err != nil {
-			return "", fmt.Errorf("gocode: unmarshal tool input: %w", err)
+			return "", fmt.Errorf("luft: unmarshal tool input: %w", err)
 		}
 		return f(ctx, in)
 	}
@@ -137,7 +137,7 @@ func NewTypedTool[Input any](
 func JSONResult(v any) (string, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return "", fmt.Errorf("gocode: marshal tool result: %w", err)
+		return "", fmt.Errorf("luft: marshal tool result: %w", err)
 	}
 	return string(data), nil
 }
@@ -376,7 +376,7 @@ type Tool struct {
 func NewTool(name, description string, schema InputSchema) Tool {
 	raw, err := json.Marshal(schema)
 	if err != nil {
-		panic(fmt.Errorf("gocode: marshal tool schema for %q: %w", name, err))
+		panic(fmt.Errorf("luft: marshal tool schema for %q: %w", name, err))
 	}
 	return Tool{Name: name, Description: description, InputSchema: raw}
 }

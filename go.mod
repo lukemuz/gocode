@@ -1,3 +1,3 @@
-module github.com/lukemuz/gocode
+module github.com/lukemuz/luft
 
 go 1.21

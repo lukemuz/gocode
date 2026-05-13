@@ -6,20 +6,20 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
 )
 
 func main() {
 	ctx := context.Background()
 
-	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(luft.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Summarize two subjects in parallel, then compare them in a single follow-up call.
-	results := gocode.Parallel(ctx,
+	results := luft.Parallel(ctx,
 		func(ctx context.Context) (string, error) {
 			return singleAsk(ctx, client, "Summarize the rise of the Roman Empire in two sentences.")
 		},
@@ -44,10 +44,10 @@ func main() {
 	fmt.Println(comparison)
 }
 
-func singleAsk(ctx context.Context, client *gocode.Client, prompt string) (string, error) {
-	reply, _, err := client.Ask(ctx, "", []gocode.Message{gocode.NewUserMessage(prompt)})
+func singleAsk(ctx context.Context, client *luft.Client, prompt string) (string, error) {
+	reply, _, err := client.Ask(ctx, "", []luft.Message{luft.NewUserMessage(prompt)})
 	if err != nil {
 		return "", err
 	}
-	return gocode.TextContent(reply), nil
+	return luft.TextContent(reply), nil
 }

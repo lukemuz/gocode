@@ -4,22 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // OpenAI Responses-API hosted tools (category 1: server-executed). The API
 // runs the tool and emits its progress and result as opaque output items;
-// the agent loop carries them through gocode.ContentBlock.Raw and never
+// the agent loop carries them through luft.ContentBlock.Raw and never
 // dispatches them locally.
 //
-// Each constructor returns a gocode.ProviderTool tagged for the Responses
+// Each constructor returns a luft.ProviderTool tagged for the Responses
 // provider; passing one to the Chat Completions Provider or to a different
 // vendor fails at request build time with a clear error.
 
 // WebSearch returns the hosted web_search tool. The API performs the search
 // and inlines results as web_search_call output items.
-func WebSearch() gocode.ProviderTool {
-	return gocode.ProviderTool{
+func WebSearch() luft.ProviderTool {
+	return luft.ProviderTool{
 		Provider: ResponsesProviderTag,
 		Raw:      mustMarshalResponsesTool(map[string]any{"type": "web_search"}),
 	}
@@ -35,14 +35,14 @@ type CodeInterpreterOpts struct {
 
 // CodeInterpreter returns the hosted code_interpreter tool. With no opts the
 // API allocates a fresh sandboxed Python container per response.
-func CodeInterpreter(opts CodeInterpreterOpts) gocode.ProviderTool {
+func CodeInterpreter(opts CodeInterpreterOpts) luft.ProviderTool {
 	body := map[string]any{"type": "code_interpreter"}
 	if opts.ContainerID != "" {
 		body["container"] = opts.ContainerID
 	} else {
 		body["container"] = map[string]any{"type": "auto"}
 	}
-	return gocode.ProviderTool{
+	return luft.ProviderTool{
 		Provider: ResponsesProviderTag,
 		Raw:      mustMarshalResponsesTool(body),
 	}
@@ -60,8 +60,8 @@ type FileSearchOpts struct {
 
 // FileSearch returns the hosted file_search tool over the supplied OpenAI
 // vector stores. Uploading and indexing files into a vector store is out of
-// scope for gocode; use the OpenAI SDK or REST API for that.
-func FileSearch(opts FileSearchOpts) gocode.ProviderTool {
+// scope for luft; use the OpenAI SDK or REST API for that.
+func FileSearch(opts FileSearchOpts) luft.ProviderTool {
 	body := map[string]any{
 		"type":             "file_search",
 		"vector_store_ids": opts.VectorStoreIDs,
@@ -69,7 +69,7 @@ func FileSearch(opts FileSearchOpts) gocode.ProviderTool {
 	if opts.MaxNumResults > 0 {
 		body["max_num_results"] = opts.MaxNumResults
 	}
-	return gocode.ProviderTool{
+	return luft.ProviderTool{
 		Provider: ResponsesProviderTag,
 		Raw:      mustMarshalResponsesTool(body),
 	}
@@ -78,8 +78,8 @@ func FileSearch(opts FileSearchOpts) gocode.ProviderTool {
 // ImageGeneration returns the hosted image_generation tool. The API generates
 // an image and returns it as an image_generation_call output item carrying
 // base64-encoded image data.
-func ImageGeneration() gocode.ProviderTool {
-	return gocode.ProviderTool{
+func ImageGeneration() luft.ProviderTool {
+	return luft.ProviderTool{
 		Provider: ResponsesProviderTag,
 		Raw:      mustMarshalResponsesTool(map[string]any{"type": "image_generation"}),
 	}
@@ -90,7 +90,7 @@ func ImageGeneration() gocode.ProviderTool {
 func mustMarshalResponsesTool(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
-		panic(fmt.Errorf("gocode: openai-responses: marshal provider tool: %w", err))
+		panic(fmt.Errorf("luft: openai-responses: marshal provider tool: %w", err))
 	}
 	return b
 }

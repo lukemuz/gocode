@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // responsesCapture records the request body for assertion.
@@ -52,10 +52,10 @@ func TestResponses_BasicTextRoundTrip(t *testing.T) {
 	srv, cap := stubResponsesServer(t, reply)
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	out, err := p.Call(context.Background(), gocode.ProviderRequest{
+	out, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-test",
 		System:   "be brief",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -66,7 +66,7 @@ func TestResponses_BasicTextRoundTrip(t *testing.T) {
 	if out.Usage.InputTokens != 12 || out.Usage.OutputTokens != 3 {
 		t.Errorf("usage = %+v", out.Usage)
 	}
-	if len(out.Content) != 1 || out.Content[0].Type != gocode.TypeText || out.Content[0].Text != "Hello!" {
+	if len(out.Content) != 1 || out.Content[0].Type != luft.TypeText || out.Content[0].Text != "Hello!" {
 		t.Errorf("content = %+v", out.Content)
 	}
 
@@ -104,11 +104,11 @@ func TestResponses_FunctionCallTriggersToolUse(t *testing.T) {
 	srv, _ := stubResponsesServer(t, reply)
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	out, err := p.Call(context.Background(), gocode.ProviderRequest{
+	out, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("compute")},
-		Tools: []gocode.Tool{gocode.NewTool("calc", "compute", gocode.Object(
-			gocode.Number("a", "value", gocode.Required()),
+		Messages: []luft.Message{luft.NewUserMessage("compute")},
+		Tools: []luft.Tool{luft.NewTool("calc", "compute", luft.Object(
+			luft.Number("a", "value", luft.Required()),
 		))},
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestResponses_FunctionCallTriggersToolUse(t *testing.T) {
 	if out.StopReason != "tool_use" {
 		t.Fatalf("stop = %q, want tool_use", out.StopReason)
 	}
-	if len(out.Content) != 1 || out.Content[0].Type != gocode.TypeToolUse {
+	if len(out.Content) != 1 || out.Content[0].Type != luft.TypeToolUse {
 		t.Fatalf("content = %+v", out.Content)
 	}
 	got := out.Content[0]
@@ -131,17 +131,17 @@ func TestResponses_ToolResultRoundTripsAsFunctionCallOutput(t *testing.T) {
 		`{"id":"r","status":"completed","output":[],"usage":{}}`)
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	history := []gocode.Message{
-		gocode.NewUserMessage("hi"),
-		{Role: gocode.RoleAssistant, Content: []gocode.ContentBlock{{
-			Type:  gocode.TypeToolUse,
+	history := []luft.Message{
+		luft.NewUserMessage("hi"),
+		{Role: luft.RoleAssistant, Content: []luft.ContentBlock{{
+			Type:  luft.TypeToolUse,
 			ID:    "call_1",
 			Name:  "calc",
 			Input: json.RawMessage(`{"a":1}`),
 		}}},
-		gocode.NewToolResultMessage([]gocode.ToolResult{{ToolUseID: "call_1", Content: "42"}}),
+		luft.NewToolResultMessage([]luft.ToolResult{{ToolUseID: "call_1", Content: "42"}}),
 	}
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{Model: "gpt-test", Messages: history})
+	_, err := p.Call(context.Background(), luft.ProviderRequest{Model: "gpt-test", Messages: history})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -170,10 +170,10 @@ func TestResponses_HostedToolWireForm(t *testing.T) {
 		`{"id":"r","status":"completed","output":[],"usage":{}}`)
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("search")},
-		ProviderTools: []gocode.ProviderTool{
+		Messages: []luft.Message{luft.NewUserMessage("search")},
+		ProviderTools: []luft.ProviderTool{
 			WebSearch(),
 			CodeInterpreter(CodeInterpreterOpts{}),
 			FileSearch(FileSearchOpts{
@@ -223,11 +223,11 @@ func TestResponses_FunctionToolFlatShape(t *testing.T) {
 		`{"id":"r","status":"completed","output":[],"usage":{}}`)
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools: []gocode.Tool{gocode.NewTool("calc", "compute", gocode.Object(
-			gocode.Number("a", "v", gocode.Required()),
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		Tools: []luft.Tool{luft.NewTool("calc", "compute", luft.Object(
+			luft.Number("a", "v", luft.Required()),
 		))},
 	})
 	if err != nil {
@@ -269,9 +269,9 @@ func TestResponses_OpaqueOutputRoundTrip(t *testing.T) {
     }`
 	srv, _ := stubResponsesServer(t, reply)
 	p := newResponsesProviderForTest(t, srv.URL)
-	out, err := p.Call(context.Background(), gocode.ProviderRequest{
+	out, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -282,18 +282,18 @@ func TestResponses_OpaqueOutputRoundTrip(t *testing.T) {
 	if out.Content[0].Type != "web_search_call" || len(out.Content[0].Raw) == 0 {
 		t.Errorf("web_search_call should be opaque: %+v", out.Content[0])
 	}
-	if out.Content[1].Type != gocode.TypeText || out.Content[1].Text != "done" {
+	if out.Content[1].Type != luft.TypeText || out.Content[1].Text != "done" {
 		t.Errorf("message text wrong: %+v", out.Content[1])
 	}
 
 	srv2, cap := stubResponsesServer(t,
 		`{"id":"r","status":"completed","output":[],"usage":{}}`)
 	p2 := newResponsesProviderForTest(t, srv2.URL)
-	history := []gocode.Message{
-		gocode.NewUserMessage("hi"),
-		{Role: gocode.RoleAssistant, Content: out.Content},
+	history := []luft.Message{
+		luft.NewUserMessage("hi"),
+		{Role: luft.RoleAssistant, Content: out.Content},
 	}
-	_, err = p2.Call(context.Background(), gocode.ProviderRequest{Model: "gpt-test", Messages: history})
+	_, err = p2.Call(context.Background(), luft.ProviderRequest{Model: "gpt-test", Messages: history})
 	if err != nil {
 		t.Fatalf("Call (round-trip): %v", err)
 	}
@@ -318,9 +318,9 @@ func TestResponses_StatusIncompleteMaxTokens(t *testing.T) {
     }`
 	srv, _ := stubResponsesServer(t, reply)
 	p := newResponsesProviderForTest(t, srv.URL)
-	out, err := p.Call(context.Background(), gocode.ProviderRequest{
+	out, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -335,14 +335,14 @@ func TestResponses_RejectsForeignProviderTool(t *testing.T) {
 		`{"id":"r","status":"completed","output":[],"usage":{}}`)
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	bad := gocode.ProviderTool{
+	bad := luft.ProviderTool{
 		Provider: "anthropic",
 		Raw:      json.RawMessage(`{"type":"web_search_20250305","name":"web_search"}`),
 	}
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:         "gpt-test",
-		Messages:      []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{bad},
+		Messages:      []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{bad},
 	})
 	if err == nil || !strings.Contains(err.Error(), "tagged for provider") {
 		t.Fatalf("expected mismatch error, got %v", err)
@@ -358,10 +358,10 @@ func TestResponses_ChatCompletionsRejectsResponsesTool(t *testing.T) {
 	}))
 	defer srv.Close()
 	p, _ := NewProvider(Config{APIKey: "t", BaseURL: srv.URL})
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:         "gpt",
-		Messages:      []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{WebSearch()},
+		Messages:      []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{WebSearch()},
 	})
 	if err == nil || !strings.Contains(err.Error(), "Responses-API") {
 		t.Fatalf("expected guidance about Responses-API, got %v", err)
@@ -381,17 +381,17 @@ func TestResponses_StreamTextDeltas(t *testing.T) {
 	defer srv.Close()
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	var deltas []gocode.ContentBlock
+	var deltas []luft.ContentBlock
 	out, err := p.Stream(context.Background(),
-		gocode.ProviderRequest{Model: "gpt-test", Messages: []gocode.Message{gocode.NewUserMessage("hi")}},
-		func(b gocode.ContentBlock) { deltas = append(deltas, b) },
+		luft.ProviderRequest{Model: "gpt-test", Messages: []luft.Message{luft.NewUserMessage("hi")}},
+		func(b luft.ContentBlock) { deltas = append(deltas, b) },
 	)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
 	textDeltas := 0
 	for _, d := range deltas {
-		if d.Type == gocode.TypeText {
+		if d.Type == luft.TypeText {
 			textDeltas++
 		}
 	}
@@ -404,7 +404,7 @@ func TestResponses_StreamTextDeltas(t *testing.T) {
 	if out.Usage.InputTokens != 4 || out.Usage.OutputTokens != 2 {
 		t.Errorf("usage = %+v", out.Usage)
 	}
-	if len(out.Content) != 1 || out.Content[0].Type != gocode.TypeText || out.Content[0].Text != "Hello" {
+	if len(out.Content) != 1 || out.Content[0].Type != luft.TypeText || out.Content[0].Text != "Hello" {
 		t.Errorf("content = %+v", out.Content)
 	}
 }
@@ -422,10 +422,10 @@ func TestResponses_StreamFunctionCallArgs(t *testing.T) {
 	defer srv.Close()
 	p := newResponsesProviderForTest(t, srv.URL)
 
-	var deltas []gocode.ContentBlock
+	var deltas []luft.ContentBlock
 	out, err := p.Stream(context.Background(),
-		gocode.ProviderRequest{Model: "gpt-test", Messages: []gocode.Message{gocode.NewUserMessage("compute")}},
-		func(b gocode.ContentBlock) { deltas = append(deltas, b) },
+		luft.ProviderRequest{Model: "gpt-test", Messages: []luft.Message{luft.NewUserMessage("compute")}},
+		func(b luft.ContentBlock) { deltas = append(deltas, b) },
 	)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
@@ -433,7 +433,7 @@ func TestResponses_StreamFunctionCallArgs(t *testing.T) {
 	if out.StopReason != "tool_use" {
 		t.Errorf("stop = %q, want tool_use", out.StopReason)
 	}
-	if len(out.Content) != 1 || out.Content[0].Type != gocode.TypeToolUse {
+	if len(out.Content) != 1 || out.Content[0].Type != luft.TypeToolUse {
 		t.Fatalf("content = %+v", out.Content)
 	}
 	got := out.Content[0]
@@ -443,7 +443,7 @@ func TestResponses_StreamFunctionCallArgs(t *testing.T) {
 
 	sawAccum := false
 	for _, d := range deltas {
-		if d.Type == gocode.TypeToolUse && string(d.Input) == `{"a":1}` {
+		if d.Type == luft.TypeToolUse && string(d.Input) == `{"a":1}` {
 			sawAccum = true
 		}
 	}
@@ -467,15 +467,15 @@ func TestResponses_ChatCompletions_DropsCacheMarkers(t *testing.T) {
 	defer srv.Close()
 	p, _ := NewProvider(Config{APIKey: "t", BaseURL: srv.URL})
 
-	tool := gocode.NewTool("calc", "do math",
-		gocode.Object(gocode.Number("a", "v", gocode.Required())))
-	tool.CacheControl = gocode.Ephemeral()
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	tool := luft.NewTool("calc", "do math",
+		luft.Object(luft.Number("a", "v", luft.Required())))
+	tool.CacheControl = luft.Ephemeral()
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:       "gpt-test",
 		System:      "sys",
-		SystemCache: gocode.Ephemeral(),
-		Messages:    []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:       []gocode.Tool{tool},
+		SystemCache: luft.Ephemeral(),
+		Messages:    []luft.Message{luft.NewUserMessage("hi")},
+		Tools:       []luft.Tool{tool},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)

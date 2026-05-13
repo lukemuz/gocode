@@ -1,4 +1,4 @@
-// gocode is a CLI coding agent built on the gocode toolkit.
+// luft is a CLI coding agent built on the luft toolkit.
 //
 // Topology (Phase 2):
 //
@@ -20,7 +20,7 @@
 // Usage:
 //
 //	export OPENROUTER_API_KEY=sk-or-...
-//	cd ~/your-project && gocode
+//	cd ~/your-project && luft
 //
 // The agent is sandboxed to the current working directory by default.
 // Pass -dir to operate on a different directory.
@@ -65,24 +65,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/openrouter"
-	"github.com/lukemuz/gocode/tools/bash"
-	"github.com/lukemuz/gocode/tools/batch"
-	"github.com/lukemuz/gocode/tools/clock"
-	"github.com/lukemuz/gocode/tools/editor"
-	"github.com/lukemuz/gocode/tools/subagent"
-	"github.com/lukemuz/gocode/tools/todo"
-	"github.com/lukemuz/gocode/tools/web"
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/openrouter"
+	"github.com/lukemuz/luft/tools/bash"
+	"github.com/lukemuz/luft/tools/batch"
+	"github.com/lukemuz/luft/tools/clock"
+	"github.com/lukemuz/luft/tools/editor"
+	"github.com/lukemuz/luft/tools/subagent"
+	"github.com/lukemuz/luft/tools/todo"
+	"github.com/lukemuz/luft/tools/web"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
-// version is the build-time version of the gocode CLI. The default tracks
+// version is the build-time version of the luft CLI. The default tracks
 // the most recent tagged release; release builds can override it with
 // `go build -ldflags "-X main.version=vX.Y.Z"`.
 var version = "v0.1.2"
 
-const mainSystemPrompt = `You are gocode, a fast and economical CLI coding assistant built on the gocode toolkit.
+const mainSystemPrompt = `You are luft, a fast and economical CLI coding assistant built on the luft toolkit.
 
 You operate inside a workspace directory. Available tools:
 - list_directory, Glob, Grep, read_file, file_info: read-only filesystem inspection
@@ -105,7 +105,7 @@ Operating principles:
 7. After making edits, verify your work with appropriate checks (build, type-check, run affected tests via bash) before declaring success. Don't trust an edit you haven't checked.
 8. When you change files, summarize the diff in one or two lines after.`
 
-const exploreSystemPrompt = `You are gocode's explore specialist — a fast, focused researcher.
+const exploreSystemPrompt = `You are luft's explore specialist — a fast, focused researcher.
 
 You answer self-contained, well-bounded questions and return concise, factual summaries. Two common shapes:
 - Repo research: inspect the codebase to find callers, audit a pattern, summarise a module, locate references, etc.
@@ -120,7 +120,7 @@ Operating principles:
 4. Keep your final summary tight — it's the only thing the orchestrator sees. Aim for the smallest answer that fully resolves the task.
 5. Do not edit files. You have no write access. Refuse if asked.`
 
-const planSystemPrompt = `You are gocode's plan specialist — a careful reasoner backed by a strong model.
+const planSystemPrompt = `You are luft's plan specialist — a careful reasoner backed by a strong model.
 
 You receive a design, implementation-planning, or debugging question along with relevant context the orchestrator has gathered. You have read-only filesystem tools to verify specifics, but no shell and no edits.
 
@@ -132,15 +132,15 @@ Operating principles:
 
 func main() {
 	dir := flag.String("dir", ".", "working directory the agent is sandboxed to (defaults to the current directory)")
-	model := flag.String("model", envOr("GOCODE_MODEL", "x-ai/grok-4.3"), "main-agent model id (any OpenRouter slug; env: GOCODE_MODEL)")
-	exploreModel := flag.String("explore-model", envOr("GOCODE_EXPLORE_MODEL", "openai/gpt-oss-120b"), "model id for the explore subagent (env: GOCODE_EXPLORE_MODEL)")
-	planModel := flag.String("plan-model", envOr("GOCODE_PLAN_MODEL", "x-ai/grok-4.3"), "model id for the plan subagent (env: GOCODE_PLAN_MODEL)")
+	model := flag.String("model", envOr("LUFT_MODEL", "x-ai/grok-4.3"), "main-agent model id (any OpenRouter slug; env: LUFT_MODEL)")
+	exploreModel := flag.String("explore-model", envOr("LUFT_EXPLORE_MODEL", "openai/gpt-oss-120b"), "model id for the explore subagent (env: LUFT_EXPLORE_MODEL)")
+	planModel := flag.String("plan-model", envOr("LUFT_PLAN_MODEL", "x-ai/grok-4.3"), "model id for the plan subagent (env: LUFT_PLAN_MODEL)")
 	noSubagents := flag.Bool("no-subagents", false, "disable explore and plan subagent tools")
 	noFetch := flag.Bool("no-fetch", false, "disable the native web_fetch tool")
 	bashMode := flag.String("bash", "restricted", "bash safety mode: restricted | standard | unrestricted")
 	autoYes := flag.Bool("yes", false, "auto-approve every confirmation prompt")
 	maxIter := flag.Int("max-iter", 30, "max model calls per turn")
-	logPath := flag.String("log", "", "JSONL session log path. Pass `auto` to write under ~/.config/gocode/sessions/")
+	logPath := flag.String("log", "", "JSONL session log path. Pass `auto` to write under ~/.config/luft/sessions/")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -181,7 +181,7 @@ func main() {
 		}
 		logFile = f
 		resolvedLog = path
-		mainClient = mainClient.WithRecorder(gocode.NewJSONLRecorder(f))
+		mainClient = mainClient.WithRecorder(luft.NewJSONLRecorder(f))
 	}
 	defer func() {
 		if logFile != nil {
@@ -202,12 +202,12 @@ func main() {
 
 	// Read-only middleware stack: timeout, output cap, logging. No
 	// confirmation needed; these tools cannot mutate state.
-	roMiddleware := []gocode.Middleware{
-		gocode.WithTimeout(60 * time.Second),
-		gocode.WithResultLimit(64 * 1024),
-		gocode.WithLogging(logger),
+	roMiddleware := []luft.Middleware{
+		luft.WithTimeout(60 * time.Second),
+		luft.WithResultLimit(64 * 1024),
+		luft.WithLogging(logger),
 	}
-	roTools := gocode.MustJoin(ws.Toolset(), clk.Toolset()).Wrap(roMiddleware...)
+	roTools := luft.MustJoin(ws.Toolset(), clk.Toolset()).Wrap(roMiddleware...)
 
 	// Restricted bash for subagents: read-only commands only, no
 	// confirmation needed.
@@ -220,29 +220,29 @@ func main() {
 	// Web tools (web_fetch) are constructed up here so subagents can
 	// include them and so batch can fan out concurrent fetches. Empty
 	// when --no-fetch is set; an empty toolset contributes no bindings.
-	var webTools gocode.Toolset
+	var webTools luft.Toolset
 	if !*noFetch {
 		webTools = web.New(web.Config{}).Toolset().Wrap(
-			gocode.WithTimeout(30*time.Second),
-			gocode.WithResultLimit(64*1024),
-			gocode.WithLogging(logger),
+			luft.WithTimeout(30*time.Second),
+			luft.WithResultLimit(64*1024),
+			luft.WithLogging(logger),
 		)
 	}
 
 	// Batch tool for read-only fan-out. Built from already-wrapped read-only
 	// bindings so each sub-call inherits the timeout/limit/logging stack.
 	roBatchBinding := batch.New(batch.Config{
-		Bindings:    append(append(append([]gocode.ToolBinding{}, roTools.Bindings...), subBashToolset.Bindings...), webTools.Bindings...),
+		Bindings:    append(append(append([]luft.ToolBinding{}, roTools.Bindings...), subBashToolset.Bindings...), webTools.Bindings...),
 		MaxParallel: 8,
 	})
 
 	// --- subagent tools ----------------------------------------------------
 
-	var subagentBindings []gocode.ToolBinding
+	var subagentBindings []luft.ToolBinding
 	if !*noSubagents {
 		exploreClient := mainClient.WithModel(*exploreModel)
-		exploreTools := gocode.MustJoin(roTools, subBashToolset, webTools, gocode.Tools(roBatchBinding)).
-			CacheLast(gocode.Ephemeral())
+		exploreTools := luft.MustJoin(roTools, subBashToolset, webTools, luft.Tools(roBatchBinding)).
+			CacheLast(luft.Ephemeral())
 		exploreBinding, err := subagent.New(subagent.Config{
 			Name:        "explore",
 			Description: "Delegate a bounded research task to a fast, cheap specialist. Two main shapes: (a) repo research — find callers, audit a pattern, summarise a module, locate references; (b) bounded Q&A — answer a well-scoped question from provided context, fetched docs, or general knowledge (e.g. 'what does this stdlib function do', 'summarise this RFC's caching rules'). The specialist has read-only filesystem tools, restricted bash, web_fetch, and batch fan-out; it returns a concise summary and its iteration history stays out of your context. Pass a self-contained task description with any context the specialist needs. Default for any task that would otherwise have you read 3+ files or research a well-scoped question yourself.",
@@ -261,13 +261,13 @@ func main() {
 			Description: "Delegate design and architecture work to a stronger reasoning model (better at multi-step architectural reasoning and invariant tracking across components). Get a structured plan before editing when work touches 3+ files, changes a public interface or shared data shape, has multiple plausible tradeoffs, or you've spent 2+ debugging turns without a clear hypothesis. Pass the question PLUS context you've gathered (file excerpts, error messages, prior attempts). Returns a numbered plan with files to touch and risks. Skip for routine single-file changes or when your approach is already clear.",
 			Client:      planClient,
 			System:      planSystemPrompt,
-			Tools:       roTools.CacheLast(gocode.Ephemeral()),
+			Tools:       roTools.CacheLast(luft.Ephemeral()),
 			MaxIter:     25,
 		})
 		if err != nil {
 			log.Fatal(err)
 		}
-		subagentBindings = []gocode.ToolBinding{exploreBinding, planBinding}
+		subagentBindings = []luft.ToolBinding{exploreBinding, planBinding}
 	}
 
 	// --- main-agent edit tools ---------------------------------------------
@@ -284,23 +284,23 @@ func main() {
 	}
 	editorBindings := ed.Toolset().Bindings
 
-	editTools := gocode.Tools(append(mainBashBindings, editorBindings...)...).Wrap(
-		gocode.WithConfirmation(confirm),
-		gocode.WithTimeout(60*time.Second),
-		gocode.WithResultLimit(64*1024),
-		gocode.WithLogging(logger),
+	editTools := luft.Tools(append(mainBashBindings, editorBindings...)...).Wrap(
+		luft.WithConfirmation(confirm),
+		luft.WithTimeout(60*time.Second),
+		luft.WithResultLimit(64*1024),
+		luft.WithLogging(logger),
 	)
 
 	// --- main agent assembly ----------------------------------------------
 
-	mainTools := gocode.MustJoin(
+	mainTools := luft.MustJoin(
 		roTools,
-		gocode.Tools(roBatchBinding),
+		luft.Tools(roBatchBinding),
 		editTools,
 		todo.New().Toolset(),
 		webTools,
-		gocode.Tools(subagentBindings...),
-	).CacheLast(gocode.Ephemeral()) // cache the entire tool block — stable per session
+		luft.Tools(subagentBindings...),
+	).CacheLast(luft.Ephemeral()) // cache the entire tool block — stable per session
 
 	memory := loadProjectMemory(*dir)
 	system := mainSystemPrompt
@@ -308,11 +308,11 @@ func main() {
 		system += "\n\n## Project memory\n\n" + memory
 	}
 
-	agent := gocode.Agent{
+	agent := luft.Agent{
 		Client: mainClient,
 		System: system,
 		Tools:  mainTools,
-		Context: gocode.ContextManager{
+		Context: luft.ContextManager{
 			MaxTokens:  120_000,
 			KeepFirst:  1,
 			KeepRecent: 30,
@@ -321,8 +321,8 @@ func main() {
 	}
 
 	// Summarizer for /compact defaults to grok-4.3 (the main-tier model);
-	// override via GOCODE_SUMMARIZE_MODEL to point it at a cheaper slug.
-	summarizer := mainClient.WithModel(envOr("GOCODE_SUMMARIZE_MODEL", "x-ai/grok-4.3"))
+	// override via LUFT_SUMMARIZE_MODEL to point it at a cheaper slug.
+	summarizer := mainClient.WithModel(envOr("LUFT_SUMMARIZE_MODEL", "x-ai/grok-4.3"))
 
 	// --- run ---------------------------------------------------------------
 
@@ -335,7 +335,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s %s\n", grey(padRight(label, 10)), value)
 	}
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "  %s %s\n", boldCyan("▍gocode"), grey("— a fast, economical CLI coding agent"))
+	fmt.Fprintf(os.Stderr, "  %s %s\n", boldCyan("▍luft"), grey("— a fast, economical CLI coding agent"))
 	fmt.Fprintln(os.Stderr)
 	row("model", bold(*model))
 	row("bash", *bashMode)
@@ -362,7 +362,7 @@ func main() {
 }
 
 // resolveLogPath turns a user-supplied -log value into an absolute path.
-// "auto" expands to ~/.config/gocode/sessions/<timestamp>.jsonl, creating
+// "auto" expands to ~/.config/luft/sessions/<timestamp>.jsonl, creating
 // the directory if needed. Any other value is treated as a literal path.
 func resolveLogPath(spec string) (string, error) {
 	if spec != "auto" {
@@ -372,7 +372,7 @@ func resolveLogPath(spec string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".config", "gocode", "sessions")
+	dir := filepath.Join(home, ".config", "luft", "sessions")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -380,17 +380,17 @@ func resolveLogPath(spec string) (string, error) {
 	return filepath.Join(dir, stamp+".jsonl"), nil
 }
 
-func mustClient(provider gocode.Provider, model string) *gocode.Client {
-	c, err := gocode.New(gocode.Config{
+func mustClient(provider luft.Provider, model string) *luft.Client {
+	c, err := luft.New(luft.Config{
 		Provider:  provider,
 		Model:     model,
 		MaxTokens: 8192,
-		Retry: gocode.RetryConfig{
+		Retry: luft.RetryConfig{
 			MaxRetries:  3,
 			InitialWait: time.Second,
 			MaxWait:     10 * time.Second,
 		},
-		SystemCache: &gocode.CacheControl{Type: "ephemeral"},
+		SystemCache: &luft.CacheControl{Type: "ephemeral"},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -398,9 +398,9 @@ func mustClient(provider gocode.Provider, model string) *gocode.Client {
 	return c
 }
 
-func makeConfirmer(autoYes bool) func(ctx context.Context, b gocode.ToolBinding, input json.RawMessage) (bool, error) {
+func makeConfirmer(autoYes bool) func(ctx context.Context, b luft.ToolBinding, input json.RawMessage) (bool, error) {
 	reader := bufio.NewReader(os.Stdin)
-	return func(ctx context.Context, b gocode.ToolBinding, input json.RawMessage) (bool, error) {
+	return func(ctx context.Context, b luft.ToolBinding, input json.RawMessage) (bool, error) {
 		if !b.Meta.RequiresConfirmation || autoYes {
 			return true, nil
 		}

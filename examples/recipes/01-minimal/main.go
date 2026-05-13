@@ -1,4 +1,4 @@
-// Recipe 01-minimal: the smallest tool-using agent gocode can express
+// Recipe 01-minimal: the smallest tool-using agent luft can express
 // with primitives alone. No streaming, no middleware, no context manager,
 // no Agent block. Just Client + tools + Loop.
 //
@@ -20,10 +20,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
-	"github.com/lukemuz/gocode/tools/clock"
-	"github.com/lukemuz/gocode/tools/math"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
+	"github.com/lukemuz/luft/tools/clock"
+	"github.com/lukemuz/luft/tools/math"
 )
 
 func main() {
@@ -32,17 +32,17 @@ func main() {
 		log.Fatal(`usage: minimal "your question"`)
 	}
 
-	client, err := anthropic.NewClientFromEnv(gocode.ModelSonnet)
+	client, err := anthropic.NewClientFromEnv(luft.ModelSonnet)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	tools := gocode.MustJoin(clock.New().Toolset(), math.New().Toolset())
+	tools := luft.MustJoin(clock.New().Toolset(), math.New().Toolset())
 
 	result, err := client.Loop(
 		context.Background(),
 		"You are a concise helper. Use your tools when they would give a more accurate answer than guessing.",
-		[]gocode.Message{gocode.NewUserMessage(question)},
+		[]luft.Message{luft.NewUserMessage(question)},
 		tools,
 		5,
 	)

@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 //
 // Typical usage:
 //
-//	cm := gocode.ContextManager{
+//	cm := luft.ContextManager{
 //	    MaxTokens:  8000,
 //	    KeepFirst:  1,   // always keep the initial user message
 //	    KeepRecent: 10,  // always keep the last 10 messages
@@ -81,7 +81,7 @@ func (m ContextManager) Trim(ctx context.Context, history []Message) ([]Message,
 
 	count, err := counter(history)
 	if err != nil {
-		return nil, fmt.Errorf("gocode: context: count tokens: %w", err)
+		return nil, fmt.Errorf("luft: context: count tokens: %w", err)
 	}
 	if count <= m.MaxTokens {
 		return history, nil
@@ -120,7 +120,7 @@ func (m ContextManager) Trim(ctx context.Context, history []Message) ([]Message,
 
 	summary, err := m.Summarizer(ctx, trimZone)
 	if err != nil {
-		return nil, fmt.Errorf("gocode: context: summarize: %w", err)
+		return nil, fmt.Errorf("luft: context: summarize: %w", err)
 	}
 	result := make([]Message, 0, headEnd+1+(n-tailStart))
 	result = append(result, history[:headEnd]...)

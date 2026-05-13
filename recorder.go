@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -65,22 +65,22 @@ const (
 // Iter matches the iteration whose tool_use block produced the call, so all
 // tool events from one parallel batch share Iter and are ordered by Seq.
 type Event struct {
-	Seq     int64     `json:"seq"`
-	TurnID  string    `json:"turn_id"`
-	Iter    int       `json:"iter"`
-	Type    EventType `json:"type"`
-	Time    time.Time `json:"time"`
-	History []Message `json:"history,omitempty"`     // TurnStart
-	Message *Message  `json:"message,omitempty"`     // ModelResponse
-	Usage   *Usage    `json:"usage,omitempty"`       // ModelResponse, TurnEnd
-	StopReason string `json:"stop_reason,omitempty"` // ModelResponse
+	Seq        int64     `json:"seq"`
+	TurnID     string    `json:"turn_id"`
+	Iter       int       `json:"iter"`
+	Type       EventType `json:"type"`
+	Time       time.Time `json:"time"`
+	History    []Message `json:"history,omitempty"`     // TurnStart
+	Message    *Message  `json:"message,omitempty"`     // ModelResponse
+	Usage      *Usage    `json:"usage,omitempty"`       // ModelResponse, TurnEnd
+	StopReason string    `json:"stop_reason,omitempty"` // ModelResponse
 
-	ToolUseID  string          `json:"tool_use_id,omitempty"`  // ToolCallStart, ToolCallEnd
-	ToolName   string          `json:"tool_name,omitempty"`    // ToolCallStart, ToolCallEnd
-	ToolInput  json.RawMessage `json:"tool_input,omitempty"`   // ToolCallStart
-	ToolOutput string          `json:"tool_output,omitempty"`  // ToolCallEnd
-	ToolError  string          `json:"tool_error,omitempty"`   // ToolCallEnd (when IsError)
-	IsError    bool            `json:"is_error,omitempty"`     // ToolCallEnd
+	ToolUseID  string          `json:"tool_use_id,omitempty"` // ToolCallStart, ToolCallEnd
+	ToolName   string          `json:"tool_name,omitempty"`   // ToolCallStart, ToolCallEnd
+	ToolInput  json.RawMessage `json:"tool_input,omitempty"`  // ToolCallStart
+	ToolOutput string          `json:"tool_output,omitempty"` // ToolCallEnd
+	ToolError  string          `json:"tool_error,omitempty"`  // ToolCallEnd (when IsError)
+	IsError    bool            `json:"is_error,omitempty"`    // ToolCallEnd
 
 	Attempt int           `json:"attempt,omitempty"` // RetryAttempt
 	Wait    time.Duration `json:"wait,omitempty"`    // RetryAttempt

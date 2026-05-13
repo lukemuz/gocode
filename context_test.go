@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -128,8 +128,8 @@ func TestContextManagerTrim(t *testing.T) {
 			toolUseMsg("tu1", "search"), // 1 — assistant with tool_use
 			toolResultMsg("tu1", "res"), // 2 — tool_result (not a plain user)
 			Message{Role: RoleAssistant, Content: []ContentBlock{{Type: TypeText, Text: "done"}}}, // 3
-			NewUserMessage("user1"),     // 4 — plain user (safe cut)
-			Message{Role: RoleAssistant, Content: []ContentBlock{{Type: TypeText, Text: "ok"}}},   // 5
+			NewUserMessage("user1"), // 4 — plain user (safe cut)
+			Message{Role: RoleAssistant, Content: []ContentBlock{{Type: TypeText, Text: "ok"}}}, // 5
 		}
 		cm := ContextManager{MaxTokens: 4, KeepFirst: 2, KeepRecent: 2, TokenCounter: countMessages}
 		got, err := cm.Trim(ctx, h)
@@ -149,12 +149,12 @@ func TestContextManagerTrim(t *testing.T) {
 		// KeepRecent=3 would start at index 5 (asst with tool_use) — not a clean cut.
 		// prevCleanCut should walk back to index 4 (user2, the plain user that precedes it).
 		h := []Message{
-			NewUserMessage("user0"),     // 0
+			NewUserMessage("user0"), // 0
 			Message{Role: RoleAssistant, Content: []ContentBlock{{Type: TypeText, Text: "a0"}}}, // 1
-			NewUserMessage("user1"),     // 2
+			NewUserMessage("user1"), // 2
 			Message{Role: RoleAssistant, Content: []ContentBlock{{Type: TypeText, Text: "a1"}}}, // 3
-			NewUserMessage("user2"),     // 4 — plain user (clean cut)
-			toolUseMsg("tu1", "read"),   // 5
+			NewUserMessage("user2"),      // 4 — plain user (clean cut)
+			toolUseMsg("tu1", "read"),    // 5
 			toolResultMsg("tu1", "data"), // 6
 			Message{Role: RoleAssistant, Content: []ContentBlock{{Type: TypeText, Text: "a2"}}}, // 7
 		}

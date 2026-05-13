@@ -1,6 +1,6 @@
 # Recipe 04: router with subagents-as-tools
 
-Demonstrates `gocode`'s position that **a subagent is a `ToolFunc` that
+Demonstrates `luft`'s position that **a subagent is a `ToolFunc` that
 happens to call `Loop`**. There is no `SubAgent` type. The parent's
 dispatch map is the routing mechanism.
 
@@ -25,11 +25,11 @@ go run ./examples/recipes/04-router-subagents -dir . "What does this project do,
 
 ## Library features exercised
 
-- `gocode.New`, `gocode.Config`, `gocode.Client`
-- `gocode.Agent` (the blessed middle path)
-- `gocode.NewTypedTool` with a `{task: string}` schema
-- `gocode.Join` to compose toolsets
-- `gocode.Toolset` with `ToolMetadata.Source` annotations
+- `luft.New`, `luft.Config`, `luft.Client`
+- `luft.Agent` (the blessed middle path)
+- `luft.NewTypedTool` with a `{task: string}` schema
+- `luft.Join` to compose toolsets
+- `luft.Toolset` with `ToolMetadata.Source` annotations
 - Built-in tools: `tools/clock`, `tools/workspace` (read-only)
 
 ## ADK comparison

@@ -1,6 +1,6 @@
-# gocode CLI
+# luft CLI
 
-A fast, economical CLI coding agent built on the gocode toolkit. Inspired by Claude Code; written in Go; opinionated about cost and parallelism out of the box.
+A fast, economical CLI coding agent built on the luft toolkit. Inspired by Claude Code; written in Go; opinionated about cost and parallelism out of the box.
 
 ## Install / run
 
@@ -15,17 +15,17 @@ and `openai/gpt-oss-120b` for the explore subagent (super fast and cheap
 for inspection workloads). `-model`, `-explore-model`, and `-plan-model`
 accept any OpenRouter slug (e.g. `openai/gpt-5`, `google/gemini-2.5-pro`,
 `anthropic/claude-sonnet-4.6`). Each flag has a matching env var
-(`GOCODE_MODEL`, `GOCODE_EXPLORE_MODEL`, `GOCODE_PLAN_MODEL`, plus
-`GOCODE_SUMMARIZE_MODEL` for the `/compact` summarizer) so you can pin
+(`LUFT_MODEL`, `LUFT_EXPLORE_MODEL`, `LUFT_PLAN_MODEL`, plus
+`LUFT_SUMMARIZE_MODEL` for the `/compact` summarizer) so you can pin
 tiers in your shell rc or a per-project `.envrc`.
 
 ### Option A — install once, run anywhere (recommended)
 
 ```bash
-go install github.com/lukemuz/gocode/cmd/gocode@latest
+go install github.com/lukemuz/luft/cmd/luft@latest
 ```
 
-This drops a `gocode` binary in `$(go env GOBIN)` (or `$(go env GOPATH)/bin` if `GOBIN` is unset). Make sure that directory is on your `PATH`:
+This drops a `luft` binary in `$(go env GOBIN)` (or `$(go env GOPATH)/bin` if `GOBIN` is unset). Make sure that directory is on your `PATH`:
 
 ```bash
 echo $PATH | tr ':' '\n' | grep -q "$(go env GOPATH)/bin" || \
@@ -36,32 +36,32 @@ Then from any directory you want the agent to work in:
 
 ```bash
 cd ~/your-project
-gocode
+luft
 ```
 
 To re-install after pulling new commits, run `go install ...` again.
 
 ### Option B — build a local binary in this repo
 
-From the gocode checkout:
+From the luft checkout:
 
 ```bash
-go build -o bin/gocode ./cmd/gocode
-cd ~/your-project && /path/to/gocode/bin/gocode
+go build -o bin/luft ./cmd/luft
+cd ~/your-project && /path/to/luft/bin/luft
 ```
 
 Or symlink it into your `PATH`:
 
 ```bash
-sudo ln -s "$(pwd)/bin/gocode" /usr/local/bin/gocode
+sudo ln -s "$(pwd)/bin/luft" /usr/local/bin/luft
 ```
 
 ### Option C — `go run` (development only)
 
-Useful while editing gocode itself. From the project you want to work on:
+Useful while editing luft itself. From the project you want to work on:
 
 ```bash
-go run github.com/lukemuz/gocode/cmd/gocode
+go run github.com/lukemuz/luft/cmd/luft
 ```
 
 Slow start every time (re-compiles), but no binary to manage. Pass `-dir` if you'd rather invoke it from elsewhere.
@@ -70,14 +70,14 @@ Slow start every time (re-compiles), but no binary to manage. Pass `-dir` if you
 
 ```bash
 cd ~/your-project
-gocode
+luft
 ```
 
 The agent operates on the current working directory by default. Pass `-dir <path>` to point it elsewhere without changing shells.
 
 You should see:
 ```
-gocode  model=x-ai/grok-4.3  bash=restricted  subagents=on  dir=/abs/path
+luft  model=x-ai/grok-4.3  bash=restricted  subagents=on  dir=/abs/path
         explore=openai/gpt-oss-120b  plan=x-ai/grok-4.3
 type a request, or /help for commands. ctrl-c to interrupt, ctrl-d to exit.
 > 
@@ -125,15 +125,15 @@ Two things make this fast and cheap:
 
 2. **Subagent context isolation.** When `explore` runs a 30-file investigation, all that searching and reading happens in the subagent's loop and dies with it. Only the textual summary returns to the main agent.
 
-When context fills up, run `/compact` (see below) — the summarizer (grok-4.3 by default; override with `GOCODE_SUMMARIZE_MODEL`) compresses older turns so you can keep going without starting over.
+When context fills up, run `/compact` (see below) — the summarizer (grok-4.3 by default; override with `LUFT_SUMMARIZE_MODEL`) compresses older turns so you can keep going without starting over.
 
 ## Project memory
 
-On startup gocode loads, in order, and concatenates:
+On startup luft loads, in order, and concatenates:
 
 1. `<workspace>/AGENTS.md`        — vendor-neutral convention
 2. `<workspace>/CLAUDE.md`        — Claude Code's flavour, picked up for compatibility
-3. `~/.config/gocode/AGENTS.md`   — your personal gocode preferences
+3. `~/.config/luft/AGENTS.md`   — your personal luft preferences
 4. `~/.claude/CLAUDE.md`          — your existing Claude Code memory, reused
 
 Anything found is appended to the system prompt under "## Project memory" and becomes part of the cached prefix. View what's loaded with `/memory`.
@@ -145,15 +145,15 @@ A good `AGENTS.md` is short and concrete: project conventions, how to run tests,
 | Flag | Default | Description |
 |---|---|---|
 | `-dir` | cwd | Working directory the agent is sandboxed to (defaults to the directory you launched from) |
-| `-model` | `x-ai/grok-4.3` | Main-agent model (any OpenRouter slug; env: `GOCODE_MODEL`) |
-| `-explore-model` | `openai/gpt-oss-120b` | Model for the explore subagent (env: `GOCODE_EXPLORE_MODEL`) |
-| `-plan-model` | `x-ai/grok-4.3` | Model for the plan subagent (env: `GOCODE_PLAN_MODEL`) |
+| `-model` | `x-ai/grok-4.3` | Main-agent model (any OpenRouter slug; env: `LUFT_MODEL`) |
+| `-explore-model` | `openai/gpt-oss-120b` | Model for the explore subagent (env: `LUFT_EXPLORE_MODEL`) |
+| `-plan-model` | `x-ai/grok-4.3` | Model for the plan subagent (env: `LUFT_PLAN_MODEL`) |
 | `-no-subagents` | false | Disable the explore and plan tools |
 | `-no-fetch` | false | Disable the native `web_fetch` tool |
 | `-bash` | `restricted` | `restricted` \| `standard` \| `unrestricted` |
 | `-yes` | false | Auto-approve every confirmation prompt |
 | `-max-iter` | 30 | Max model calls per user turn |
-| `-log` | (off) | JSONL session log path. Use `-log auto` to write under `~/.config/gocode/sessions/<timestamp>.jsonl`, or pass an explicit path. |
+| `-log` | (off) | JSONL session log path. Use `-log auto` to write under `~/.config/luft/sessions/<timestamp>.jsonl`, or pass an explicit path. |
 
 ### Bash safety modes
 
@@ -187,7 +187,7 @@ Session logging is **opt-in and intended for debugging** — leave it off for ev
 
 Enable it when something feels off and you want to look at what actually happened. `jq -c '.type' session.jsonl | sort | uniq -c` is a good first pass; pipe specific events to `jq -c 'select(.type == "tool_call_end") | {tool: .tool_name, bytes: (.tool_output | length), error: .is_error}'` for tool-level inspection.
 
-Note: session logs include full tool inputs and outputs, which means file contents the agent read end up on disk under `~/.config/gocode/sessions/`. Skip `-log` if you're working with anything sensitive, or pass an explicit `-log <path>` to a location you control.
+Note: session logs include full tool inputs and outputs, which means file contents the agent read end up on disk under `~/.config/luft/sessions/`. Skip `-log` if you're working with anything sensitive, or pass an explicit `-log <path>` to a location you control.
 
 ## Recipes
 

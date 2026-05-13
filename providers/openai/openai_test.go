@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 func testServerForStream(t *testing.T, lines []string) *httptest.Server {
@@ -34,9 +34,9 @@ func TestCompatibleStream(t *testing.T) {
 	tests := []struct {
 		name           string
 		streamLines    []string
-		wantDeltas     []gocode.ContentBlock
+		wantDeltas     []luft.ContentBlock
 		wantStopReason string
-		wantUsage      gocode.Usage
+		wantUsage      luft.Usage
 		wantErr        string
 	}{
 		{
@@ -47,12 +47,12 @@ func TestCompatibleStream(t *testing.T) {
 				`data: {"id":"chatcmpl-1","choices":[{"delta":{},"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`,
 				`data: [DONE]`,
 			},
-			wantDeltas: []gocode.ContentBlock{
-				{Type: gocode.TypeText, Text: "Hello"},
-				{Type: gocode.TypeText, Text: " world"},
+			wantDeltas: []luft.ContentBlock{
+				{Type: luft.TypeText, Text: "Hello"},
+				{Type: luft.TypeText, Text: " world"},
 			},
 			wantStopReason: "end_turn",
-			wantUsage:      gocode.Usage{InputTokens: 10, OutputTokens: 5},
+			wantUsage:      luft.Usage{InputTokens: 10, OutputTokens: 5},
 		},
 		{
 			name: "tool calls",
@@ -62,12 +62,12 @@ func TestCompatibleStream(t *testing.T) {
 				`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":12}}`,
 				`data: [DONE]`,
 			},
-			wantDeltas: []gocode.ContentBlock{
-				{Type: gocode.TypeToolUse, ID: "call_1", Name: "echo", Input: json.RawMessage(`{"`)},
-				{Type: gocode.TypeToolUse, ID: "call_1", Name: "echo", Input: json.RawMessage(`{"hello"}`)},
+			wantDeltas: []luft.ContentBlock{
+				{Type: luft.TypeToolUse, ID: "call_1", Name: "echo", Input: json.RawMessage(`{"`)},
+				{Type: luft.TypeToolUse, ID: "call_1", Name: "echo", Input: json.RawMessage(`{"hello"}`)},
 			},
 			wantStopReason: "tool_use",
-			wantUsage:      gocode.Usage{InputTokens: 8, OutputTokens: 12},
+			wantUsage:      luft.Usage{InputTokens: 8, OutputTokens: 12},
 		},
 		{
 			name: "error response",
@@ -91,12 +91,12 @@ func TestCompatibleStream(t *testing.T) {
 				},
 			}
 
-			var gotDeltas []gocode.ContentBlock
-			onDelta := func(b gocode.ContentBlock) { gotDeltas = append(gotDeltas, b) }
+			var gotDeltas []luft.ContentBlock
+			onDelta := func(b luft.ContentBlock) { gotDeltas = append(gotDeltas, b) }
 
-			req := gocode.ProviderRequest{
+			req := luft.ProviderRequest{
 				Model:    "gpt-4o-mini",
-				Messages: []gocode.Message{gocode.NewUserMessage("ping")},
+				Messages: []luft.Message{luft.NewUserMessage("ping")},
 			}
 			resp, err := p.Stream(context.Background(), req, onDelta)
 
@@ -132,8 +132,8 @@ func TestCompatibleStream(t *testing.T) {
 }
 
 func TestToOpenAIToolsRejectsProviderToolsByDefault(t *testing.T) {
-	pt := gocode.ProviderTool{Provider: "openrouter", Raw: json.RawMessage(`{"type":"openrouter:web_search"}`)}
-	_, err := toOpenAITools(nil, []gocode.ProviderTool{pt}, false, false)
+	pt := luft.ProviderTool{Provider: "openrouter", Raw: json.RawMessage(`{"type":"openrouter:web_search"}`)}
+	_, err := toOpenAITools(nil, []luft.ProviderTool{pt}, false, false)
 	if err == nil {
 		t.Fatal("expected error when allowProviderTools=false, got nil")
 	}
@@ -143,14 +143,14 @@ func TestToOpenAIToolsRejectsProviderToolsByDefault(t *testing.T) {
 }
 
 func TestToOpenAIToolsSplicesProviderToolsWhenAllowed(t *testing.T) {
-	fn := gocode.NewTool("calc", "do math",
-		gocode.Object(gocode.Number("a", "v", gocode.Required())))
-	pt := gocode.ProviderTool{
+	fn := luft.NewTool("calc", "do math",
+		luft.Object(luft.Number("a", "v", luft.Required())))
+	pt := luft.ProviderTool{
 		Provider: "openrouter",
 		Raw:      json.RawMessage(`{"type":"openrouter:web_search","parameters":{"max_results":3}}`),
 	}
 
-	out, err := toOpenAITools([]gocode.Tool{fn}, []gocode.ProviderTool{pt}, false, true)
+	out, err := toOpenAITools([]luft.Tool{fn}, []luft.ProviderTool{pt}, false, true)
 	if err != nil {
 		t.Fatalf("toOpenAITools: %v", err)
 	}
@@ -189,10 +189,10 @@ func TestProviderRejectsProviderToolsAtChatCompletions(t *testing.T) {
 	defer srv.Close()
 
 	p := &Provider{cfg: Config{APIKey: "test", BaseURL: srv.URL, HTTPClient: srv.Client()}}
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "gpt-4o-mini",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		ProviderTools: []gocode.ProviderTool{{
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		ProviderTools: []luft.ProviderTool{{
 			Provider: "openrouter",
 			Raw:      json.RawMessage(`{"type":"openrouter:web_search"}`),
 		}},
@@ -227,9 +227,9 @@ func TestFromOpenAIResponseSurfacesAnnotations(t *testing.T) {
 	defer srv.Close()
 
 	p := &Provider{cfg: Config{APIKey: "test", BaseURL: srv.URL, HTTPClient: srv.Client()}}
-	resp, err := p.Call(context.Background(), gocode.ProviderRequest{
+	resp, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "openai/anything",
-		Messages: []gocode.Message{gocode.NewUserMessage("when was go released?")},
+		Messages: []luft.Message{luft.NewUserMessage("when was go released?")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -237,7 +237,7 @@ func TestFromOpenAIResponseSurfacesAnnotations(t *testing.T) {
 	if len(resp.Content) != 2 {
 		t.Fatalf("got %d content blocks, want 2 (text + url_citation): %+v", len(resp.Content), resp.Content)
 	}
-	if resp.Content[0].Type != gocode.TypeText {
+	if resp.Content[0].Type != luft.TypeText {
 		t.Errorf("first block type = %q, want text", resp.Content[0].Type)
 	}
 	if resp.Content[1].Type != "url_citation" {

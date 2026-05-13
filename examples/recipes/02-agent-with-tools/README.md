@@ -6,9 +6,9 @@ management, and streamed output.
 
 ## What this shows
 
-- `gocode.Agent` as the assembly point — a thin block that ties together
+- `luft.Agent` as the assembly point — a thin block that ties together
   client, system prompt, toolset, context manager, and iteration cap
-- Built-in tools composed with `gocode.Join`: clock + math + read-only
+- Built-in tools composed with `luft.Join`: clock + math + read-only
   workspace
 - Three middlewares applied in one `Wrap` call: timeout, result limit,
   structured logging via `*slog.Logger`
@@ -31,10 +31,10 @@ go run ./examples/recipes/02-agent-with-tools -dir . "How many .go files are in 
 
 ## Library features exercised
 
-- `gocode.New`, `gocode.Config`, `gocode.RetryConfig`
-- `gocode.Agent`, `Agent.StepStream`
-- `gocode.Join`, `Toolset.Wrap`
-- `gocode.WithTimeout`, `gocode.WithResultLimit`, `gocode.WithLogging`
-- `gocode.ContextManager`
-- `gocode.NewStreamBuffer` (retry-aware streaming)
+- `luft.New`, `luft.Config`, `luft.RetryConfig`
+- `luft.Agent`, `Agent.StepStream`
+- `luft.Join`, `Toolset.Wrap`
+- `luft.WithTimeout`, `luft.WithResultLimit`, `luft.WithLogging`
+- `luft.ContextManager`
+- `luft.NewStreamBuffer` (retry-aware streaming)
 - Built-ins: `tools/clock`, `tools/math`, `tools/workspace`

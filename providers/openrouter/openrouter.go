@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/openai"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/openai"
 )
 
 const (
@@ -31,7 +31,7 @@ type Provider struct {
 // NewProvider creates an Provider, filling in defaults.
 func NewProvider(cfg Config) (*Provider, error) {
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("gocode: Config.APIKey is required")
+		return nil, fmt.Errorf("luft: Config.APIKey is required")
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = openRouterDefaultBaseURL
@@ -48,7 +48,7 @@ func NewProvider(cfg Config) (*Provider, error) {
 func NewProviderFromEnv() (*Provider, error) {
 	key := os.Getenv("OPENROUTER_API_KEY")
 	if key == "" {
-		return nil, fmt.Errorf("gocode: OPENROUTER_API_KEY environment variable is not set")
+		return nil, fmt.Errorf("luft: OPENROUTER_API_KEY environment variable is not set")
 	}
 	return NewProvider(Config{APIKey: key})
 }
@@ -56,15 +56,15 @@ func NewProviderFromEnv() (*Provider, error) {
 // NewClientFromEnv creates a Client backed by the OpenRouter provider,
 // reading the API key from OPENROUTER_API_KEY. model is any model string
 // supported by OpenRouter (e.g. "anthropic/claude-sonnet-4-6").
-func NewClientFromEnv(model string) (*gocode.Client, error) {
+func NewClientFromEnv(model string) (*luft.Client, error) {
 	provider, err := NewProviderFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return gocode.New(gocode.Config{Provider: provider, Model: model})
+	return luft.New(luft.Config{Provider: provider, Model: model})
 }
 
-// Call implements gocode.Provider for OpenRouter using the OpenAI-compatible
+// Call implements luft.Provider for OpenRouter using the OpenAI-compatible
 // chat completions endpoint.
 //
 // cacheCompatible=true: OpenRouter accepts cache_control markers (passed
@@ -75,9 +75,9 @@ func NewClientFromEnv(model string) (*gocode.Client, error) {
 // allowProviderTools=true: OpenRouter hosts tools server-side at this same
 // endpoint (e.g. WebSearch — "openrouter:web_search"); ProviderTool entries
 // are spliced verbatim into the wire tools array.
-func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode.ProviderResponse, error) {
+func (p *Provider) Call(ctx context.Context, req luft.ProviderRequest) (luft.ProviderResponse, error) {
 	if err := validateProviderTools(req.ProviderTools); err != nil {
-		return gocode.ProviderResponse{}, err
+		return luft.ProviderResponse{}, err
 	}
 	return openai.CompatibleCall(
 		ctx,
@@ -90,11 +90,11 @@ func (p *Provider) Call(ctx context.Context, req gocode.ProviderRequest) (gocode
 	)
 }
 
-// Stream implements gocode.Provider.Stream for OpenRouter by delegating to
+// Stream implements luft.Provider.Stream for OpenRouter by delegating to
 // the shared streaming helper (mirrors the Call pattern).
-func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDelta func(gocode.ContentBlock)) (gocode.ProviderResponse, error) {
+func (p *Provider) Stream(ctx context.Context, req luft.ProviderRequest, onDelta func(luft.ContentBlock)) (luft.ProviderResponse, error) {
 	if err := validateProviderTools(req.ProviderTools); err != nil {
-		return gocode.ProviderResponse{}, err
+		return luft.ProviderResponse{}, err
 	}
 	return openai.CompatibleStream(
 		ctx,
@@ -112,10 +112,10 @@ func (p *Provider) Stream(ctx context.Context, req gocode.ProviderRequest, onDel
 // provider. Mirrors what AnthropicProvider does for its own tools — surfaces
 // misuse loudly at request build time rather than dispatching a malformed
 // request.
-func validateProviderTools(pts []gocode.ProviderTool) error {
+func validateProviderTools(pts []luft.ProviderTool) error {
 	for _, pt := range pts {
 		if pt.Provider != ProviderTag {
-			return fmt.Errorf("gocode: openrouter: provider tool tagged %q cannot be used with this provider", pt.Provider)
+			return fmt.Errorf("luft: openrouter: provider tool tagged %q cannot be used with this provider", pt.Provider)
 		}
 	}
 	return nil

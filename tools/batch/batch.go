@@ -13,7 +13,7 @@
 //	   {"name": "list_directory","input": {"path": "internal/"}}
 //	]}
 //
-// The handler dispatches all four concurrently via gocode.Parallel and
+// The handler dispatches all four concurrently via luft.Parallel and
 // returns a single result that segments each sub-call's output with
 // clearly delimited headers so the model can read them apart.
 //
@@ -30,7 +30,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // Name is the tool name advertised to the model.
@@ -41,7 +41,7 @@ type Config struct {
 	// Bindings is the set of underlying tools the batch may dispatch to.
 	// Pass the wrapped toolset's Bindings so middleware (timeouts, output
 	// caps) applies to each sub-call.
-	Bindings []gocode.ToolBinding
+	Bindings []luft.ToolBinding
 
 	// MaxParallel caps how many sub-calls can run concurrently in one
 	// batch invocation. 0 disables the cap (run all at once).
@@ -49,8 +49,8 @@ type Config struct {
 }
 
 // New returns a ToolBinding wired to dispatch to the supplied bindings.
-func New(cfg Config) gocode.ToolBinding {
-	dispatch := make(map[string]gocode.ToolFunc, len(cfg.Bindings))
+func New(cfg Config) luft.ToolBinding {
+	dispatch := make(map[string]luft.ToolFunc, len(cfg.Bindings))
 	allowed := make([]string, 0, len(cfg.Bindings))
 	for _, b := range cfg.Bindings {
 		if b.Tool.Name == Name {
@@ -68,18 +68,18 @@ func New(cfg Config) gocode.ToolBinding {
 		strings.Join(allowed, ", "),
 	)
 
-	t, fn := gocode.NewTypedTool(
+	t, fn := luft.NewTypedTool(
 		Name,
 		desc,
-		gocode.InputSchema{
+		luft.InputSchema{
 			Type: "object",
-			Properties: map[string]gocode.SchemaProperty{
+			Properties: map[string]luft.SchemaProperty{
 				"calls": {
 					Type:        "array",
 					Description: "List of tool invocations to run concurrently.",
-					Items: &gocode.SchemaProperty{
+					Items: &luft.SchemaProperty{
 						Type: "object",
-						Properties: map[string]gocode.SchemaProperty{
+						Properties: map[string]luft.SchemaProperty{
 							"name":  {Type: "string", Description: "Name of the underlying tool to call."},
 							"input": {Type: "object", Description: "Input object for that tool, matching its schema."},
 						},
@@ -91,7 +91,7 @@ func New(cfg Config) gocode.ToolBinding {
 		},
 		makeHandler(dispatch, cfg.MaxParallel),
 	)
-	return gocode.ToolBinding{Tool: t, Func: fn}
+	return luft.ToolBinding{Tool: t, Func: fn}
 }
 
 type batchInput struct {
@@ -107,7 +107,7 @@ type subResult struct {
 	Err    string
 }
 
-func makeHandler(dispatch map[string]gocode.ToolFunc, maxParallel int) func(context.Context, batchInput) (string, error) {
+func makeHandler(dispatch map[string]luft.ToolFunc, maxParallel int) func(context.Context, batchInput) (string, error) {
 	return func(ctx context.Context, in batchInput) (string, error) {
 		if len(in.Calls) == 0 {
 			return "", fmt.Errorf("batch: calls is empty")

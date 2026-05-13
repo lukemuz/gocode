@@ -4,19 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // User-facing constructors for Anthropic-specific provider tools. Two flavours:
 //
 //   - Category 1 (server-executed): the Anthropic API runs the tool and
 //     returns the result inline. No Go ToolFunc is involved. Constructors
-//     return a gocode.ProviderTool, attached via Toolset.WithProviderTools.
+//     return a luft.ProviderTool, attached via Toolset.WithProviderTools.
 //     Examples: WebSearch, CodeExecution.
 //
 //   - Category 2 (provider-defined schema, client-executed): the model has
 //     been post-trained on the tool's name and schema, but you run it.
-//     Constructors take a gocode.ToolFunc and return a gocode.ToolBinding
+//     Constructors take a luft.ToolFunc and return a luft.ToolBinding
 //     that drops into a normal Toolset. The wire declaration form is
 //     {"type": "...", "name": "..."} rather than the standard
 //     {name, description, input_schema}. Examples: BashTool, TextEditorTool,
@@ -50,16 +50,16 @@ type WebSearchOpts struct {
 	UserLocation map[string]any
 }
 
-// WebSearch returns a gocode.ProviderTool that advertises Anthropic's hosted
+// WebSearch returns a luft.ProviderTool that advertises Anthropic's hosted
 // web_search tool to the model. The Anthropic API performs the search and
 // inlines the results as web_search_tool_result content blocks; the agent
-// loop transparently round-trips them via gocode.ContentBlock.Raw.
+// loop transparently round-trips them via luft.ContentBlock.Raw.
 //
 // Uses "web_search_20260209" — the dynamic-filtering generation. The prior
 // "web_search_20250305" remains accepted by the API for callers that want
 // the static-results behaviour. Bump this string when Anthropic ships a
 // newer dated identifier.
-func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
+func WebSearch(opts WebSearchOpts) luft.ProviderTool {
 	body := map[string]any{
 		"type": "web_search_20260209",
 		"name": "web_search",
@@ -76,7 +76,7 @@ func WebSearch(opts WebSearchOpts) gocode.ProviderTool {
 	if opts.UserLocation != nil {
 		body["user_location"] = opts.UserLocation
 	}
-	return gocode.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
+	return luft.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
 }
 
 // WebFetchOpts configures the Anthropic web_fetch server tool.
@@ -98,7 +98,7 @@ type WebFetchOpts struct {
 	Citations bool
 }
 
-// WebFetch returns a gocode.ProviderTool that advertises Anthropic's hosted
+// WebFetch returns a luft.ProviderTool that advertises Anthropic's hosted
 // web_fetch tool to the model. The Anthropic API performs the fetch and
 // inlines the result.
 //
@@ -107,7 +107,7 @@ type WebFetchOpts struct {
 // when the code_execution tool is also enabled; without it, behaviour
 // matches the prior "web_fetch_20250910" version. Bump this string when
 // Anthropic ships a newer dated identifier.
-func WebFetch(opts WebFetchOpts) gocode.ProviderTool {
+func WebFetch(opts WebFetchOpts) luft.ProviderTool {
 	body := map[string]any{
 		"type": "web_fetch_20260209",
 		"name": "web_fetch",
@@ -127,18 +127,18 @@ func WebFetch(opts WebFetchOpts) gocode.ProviderTool {
 	if opts.Citations {
 		body["citations"] = map[string]any{"enabled": true}
 	}
-	return gocode.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
+	return luft.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
 }
 
-// CodeExecution returns a gocode.ProviderTool that advertises Anthropic's
+// CodeExecution returns a luft.ProviderTool that advertises Anthropic's
 // hosted code_execution tool. The API runs Python in a sandbox and returns
 // code_execution_tool_result blocks inline.
-func CodeExecution() gocode.ProviderTool {
+func CodeExecution() luft.ProviderTool {
 	body := map[string]any{
 		"type": "code_execution_20250522",
 		"name": "code_execution",
 	}
-	return gocode.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
+	return luft.ProviderTool{Provider: ProviderTag, Raw: mustMarshal(body)}
 }
 
 // ---------------------------------------------------------------------------
@@ -150,22 +150,22 @@ func CodeExecution() gocode.ProviderTool {
 // model's input shape is fixed by training (a "command" string and optional
 // "restart" flag) — the handler is responsible for actually executing it.
 //
-// Pair with gocode.WithConfirmation or sandboxing middleware when running
+// Pair with luft.WithConfirmation or sandboxing middleware when running
 // untrusted output.
-func BashTool(fn gocode.ToolFunc) gocode.ToolBinding {
+func BashTool(fn luft.ToolFunc) luft.ToolBinding {
 	body := map[string]any{
 		"type": "bash_20250124",
 		"name": "bash",
 	}
-	tool := gocode.Tool{
+	tool := luft.Tool{
 		Name:     "bash",
 		Provider: ProviderTag,
 		Raw:      mustMarshal(body),
 	}
-	return gocode.ToolBinding{
+	return luft.ToolBinding{
 		Tool: tool,
 		Func: fn,
-		Meta: gocode.ToolMetadata{
+		Meta: luft.ToolMetadata{
 			Source:               "anthropic.bash_20250124",
 			Shell:                true,
 			RequiresConfirmation: true,
@@ -184,20 +184,20 @@ func BashTool(fn gocode.ToolFunc) gocode.ToolBinding {
 // This is the legacy variant. For Claude 4.x prefer TextEditor20250728,
 // which uses the newer name "str_replace_based_edit_tool", drops the
 // undo_edit command, and adds the max_characters parameter on view.
-func TextEditorTool(fn gocode.ToolFunc) gocode.ToolBinding {
+func TextEditorTool(fn luft.ToolFunc) luft.ToolBinding {
 	body := map[string]any{
 		"type": "text_editor_20250124",
 		"name": "str_replace_editor",
 	}
-	tool := gocode.Tool{
+	tool := luft.Tool{
 		Name:     "str_replace_editor",
 		Provider: ProviderTag,
 		Raw:      mustMarshal(body),
 	}
-	return gocode.ToolBinding{
+	return luft.ToolBinding{
 		Tool: tool,
 		Func: fn,
-		Meta: gocode.ToolMetadata{
+		Meta: luft.ToolMetadata{
 			Source:     "anthropic.text_editor_20250124",
 			Filesystem: true,
 		},
@@ -216,20 +216,20 @@ func TextEditorTool(fn gocode.ToolFunc) gocode.ToolBinding {
 //
 // undo_edit was removed in this version. max_characters (added 2025-07-28)
 // caps how much of a viewed file is returned.
-func TextEditor20250728(fn gocode.ToolFunc) gocode.ToolBinding {
+func TextEditor20250728(fn luft.ToolFunc) luft.ToolBinding {
 	body := map[string]any{
 		"type": "text_editor_20250728",
 		"name": "str_replace_based_edit_tool",
 	}
-	tool := gocode.Tool{
+	tool := luft.Tool{
 		Name:     "str_replace_based_edit_tool",
 		Provider: ProviderTag,
 		Raw:      mustMarshal(body),
 	}
-	return gocode.ToolBinding{
+	return luft.ToolBinding{
 		Tool: tool,
 		Func: fn,
-		Meta: gocode.ToolMetadata{
+		Meta: luft.ToolMetadata{
 			Source:               "anthropic.text_editor_20250728",
 			Filesystem:           true,
 			RequiresConfirmation: true,
@@ -252,8 +252,8 @@ type ComputerOpts struct {
 // the actual display, keyboard, and mouse.
 //
 // The handler runs with high privilege (full keyboard/mouse access on the
-// host display); consider gocode.WithConfirmation or running in a contained VM.
-func ComputerTool(opts ComputerOpts, fn gocode.ToolFunc) gocode.ToolBinding {
+// host display); consider luft.WithConfirmation or running in a contained VM.
+func ComputerTool(opts ComputerOpts, fn luft.ToolFunc) luft.ToolBinding {
 	body := map[string]any{
 		"type":              "computer_20250124",
 		"name":              "computer",
@@ -263,15 +263,15 @@ func ComputerTool(opts ComputerOpts, fn gocode.ToolFunc) gocode.ToolBinding {
 	if opts.DisplayNumber > 0 {
 		body["display_number"] = opts.DisplayNumber
 	}
-	tool := gocode.Tool{
+	tool := luft.Tool{
 		Name:     "computer",
 		Provider: ProviderTag,
 		Raw:      mustMarshal(body),
 	}
-	return gocode.ToolBinding{
+	return luft.ToolBinding{
 		Tool: tool,
 		Func: fn,
-		Meta: gocode.ToolMetadata{
+		Meta: luft.ToolMetadata{
 			Source:               "anthropic.computer_20250124",
 			RequiresConfirmation: true,
 			Destructive:          true,
@@ -285,7 +285,7 @@ func ComputerTool(opts ComputerOpts, fn gocode.ToolFunc) gocode.ToolBinding {
 func mustMarshal(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
-		panic(fmt.Errorf("gocode: anthropic: marshal provider tool: %w", err))
+		panic(fmt.Errorf("luft: anthropic: marshal provider tool: %w", err))
 	}
 	return b
 }

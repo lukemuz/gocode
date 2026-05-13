@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/stores"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/stores"
 )
 
 func TestSession_EventsRoundTripThroughFileStore(t *testing.T) {
@@ -15,18 +15,18 @@ func TestSession_EventsRoundTripThroughFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess := &gocode.Session{ID: "s1"}
-	rec := gocode.RecorderToSession(sess)
-	rec.Record(context.Background(), gocode.Event{
-		Type: gocode.EventToolCallStart, TurnID: "t1", Iter: 0,
+	sess := &luft.Session{ID: "s1"}
+	rec := luft.RecorderToSession(sess)
+	rec.Record(context.Background(), luft.Event{
+		Type: luft.EventToolCallStart, TurnID: "t1", Iter: 0,
 		ToolUseID: "u1", ToolName: "echo",
 		ToolInput: json.RawMessage(`{"a":1}`),
 	})
-	rec.Record(context.Background(), gocode.Event{
-		Type: gocode.EventToolCallEnd, TurnID: "t1", Iter: 0,
+	rec.Record(context.Background(), luft.Event{
+		Type: luft.EventToolCallEnd, TurnID: "t1", Iter: 0,
 		ToolUseID: "u1", ToolName: "echo", ToolOutput: "ok",
 	})
-	if err := gocode.Save(context.Background(), store, sess); err != nil {
+	if err := luft.Save(context.Background(), store, sess); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Get(context.Background(), "s1")

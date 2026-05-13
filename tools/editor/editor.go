@@ -6,7 +6,7 @@
 //
 //	ed, _ := editor.New(editor.Config{Root: "."})
 //	binding := anthropic.TextEditor20250728(ed.Handler())
-//	tools := gocode.Tools(binding)
+//	tools := luft.Tools(binding)
 //
 // Four commands are supported:
 //
@@ -29,7 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 const (
@@ -82,10 +82,10 @@ func New(cfg Config) (*Editor, error) {
 // function-call tool (named "str_replace_based_edit_tool"). Use this for
 // providers that don't support Anthropic's trained text_editor_20250728
 // schema (e.g. OpenAI, OpenRouter).
-func (e *Editor) Toolset() gocode.Toolset {
-	schema := gocode.InputSchema{
+func (e *Editor) Toolset() luft.Toolset {
+	schema := luft.InputSchema{
 		Type: "object",
-		Properties: map[string]gocode.SchemaProperty{
+		Properties: map[string]luft.SchemaProperty{
 			"command":        {Type: "string", Description: "One of: view, str_replace, create, insert."},
 			"path":           {Type: "string", Description: "File path relative to the workspace root."},
 			"old_str":        {Type: "string", Description: "For str_replace: the exact existing substring to replace. Must be unique."},
@@ -98,10 +98,10 @@ func (e *Editor) Toolset() gocode.Toolset {
 		Required: []string{"command", "path"},
 	}
 	desc := "View, create, or edit files in the workspace. Commands: view (read file or list directory), str_replace (in-place exact-string replacement; old_str must be unique), create (write new file; refuses to overwrite), insert (insert new_str after insert_line)."
-	tool, fn := gocode.NewTypedTool("str_replace_based_edit_tool", desc, schema, func(ctx context.Context, in editorInput) (string, error) {
+	tool, fn := luft.NewTypedTool("str_replace_based_edit_tool", desc, schema, func(ctx context.Context, in editorInput) (string, error) {
 		return e.dispatch(in)
 	})
-	return gocode.Tools(gocode.ToolBinding{Tool: tool, Func: fn, Meta: gocode.ToolMetadata{RequiresConfirmation: true}})
+	return luft.Tools(luft.ToolBinding{Tool: tool, Func: fn, Meta: luft.ToolMetadata{RequiresConfirmation: true}})
 }
 
 func (e *Editor) dispatch(in editorInput) (string, error) {
@@ -122,7 +122,7 @@ func (e *Editor) dispatch(in editorInput) (string, error) {
 }
 
 // Handler returns a ToolFunc suitable for anthropic.TextEditor20250728.
-func (e *Editor) Handler() gocode.ToolFunc {
+func (e *Editor) Handler() luft.ToolFunc {
 	return func(ctx context.Context, raw json.RawMessage) (string, error) {
 		var in editorInput
 		if err := json.Unmarshal(raw, &in); err != nil {

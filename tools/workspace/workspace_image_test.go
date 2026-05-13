@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
 // minimalPNG is a 1×1 transparent PNG. http.DetectContentType recognizes
@@ -27,13 +27,13 @@ var minimalPNG = []byte{
 	0x42, 0x60, 0x82,
 }
 
-func callReadFile(t *testing.T, ws *workspace.Workspace, path string) (string, []gocode.ImageBlock) {
+func callReadFile(t *testing.T, ws *workspace.Workspace, path string) (string, []luft.ImageBlock) {
 	t.Helper()
 	fn, ok := ws.Dispatch()["read_file"]
 	if !ok {
 		t.Fatalf("dispatch missing read_file")
 	}
-	ctx, drain := gocode.WithImageSink(context.Background())
+	ctx, drain := luft.WithImageSink(context.Background())
 	raw, _ := json.Marshal(map[string]any{"path": path})
 	out, err := fn(ctx, raw)
 	if err != nil {

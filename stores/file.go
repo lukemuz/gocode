@@ -1,10 +1,10 @@
 package stores
 
 import (
-	"github.com/lukemuz/gocode"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/lukemuz/luft"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +22,7 @@ import (
 // FileStore is safe for concurrent use within one process. It does not
 // coordinate with other processes that may read or write the same directory.
 //
-// gocode.Session IDs must be non-empty and may only contain letters, digits, hyphens,
+// luft.Session IDs must be non-empty and may only contain letters, digits, hyphens,
 // underscores, and dots. This covers UUIDs, timestamp-based IDs, and most
 // common ID schemes while preventing path traversal.
 type FileStore struct {
@@ -34,18 +34,18 @@ type FileStore struct {
 // does not exist.
 func NewFileStore(dir string) (*FileStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("gocode: FileStore: create directory: %w", err)
+		return nil, fmt.Errorf("luft: FileStore: create directory: %w", err)
 	}
 	return &FileStore{dir: dir}, nil
 }
 
-func (f *FileStore) Create(_ context.Context, s *gocode.Session) error {
+func (f *FileStore) Create(_ context.Context, s *luft.Session) error {
 	if err := validateFileSessionID(s.ID); err != nil {
 		return err
 	}
 	data, err := json.Marshal(s)
 	if err != nil {
-		return fmt.Errorf("gocode: FileStore: marshal session: %w", err)
+		return fmt.Errorf("luft: FileStore: marshal session: %w", err)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -53,20 +53,20 @@ func (f *FileStore) Create(_ context.Context, s *gocode.Session) error {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return gocode.SessionExists(s.ID)
+			return luft.SessionExists(s.ID)
 		}
-		return fmt.Errorf("gocode: FileStore: create file: %w", err)
+		return fmt.Errorf("luft: FileStore: create file: %w", err)
 	}
 	_, werr := file.Write(data)
 	cerr := file.Close()
 	if werr != nil {
 		os.Remove(path)
-		return fmt.Errorf("gocode: FileStore: write session: %w", werr)
+		return fmt.Errorf("luft: FileStore: write session: %w", werr)
 	}
 	return cerr
 }
 
-func (f *FileStore) Get(_ context.Context, id string) (*gocode.Session, error) {
+func (f *FileStore) Get(_ context.Context, id string) (*luft.Session, error) {
 	if err := validateFileSessionID(id); err != nil {
 		return nil, err
 	}
@@ -75,13 +75,13 @@ func (f *FileStore) Get(_ context.Context, id string) (*gocode.Session, error) {
 	return f.readSession(id)
 }
 
-func (f *FileStore) Update(_ context.Context, s *gocode.Session) error {
+func (f *FileStore) Update(_ context.Context, s *luft.Session) error {
 	if err := validateFileSessionID(s.ID); err != nil {
 		return err
 	}
 	data, err := json.Marshal(s)
 	if err != nil {
-		return fmt.Errorf("gocode: FileStore: marshal session: %w", err)
+		return fmt.Errorf("luft: FileStore: marshal session: %w", err)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -89,9 +89,9 @@ func (f *FileStore) Update(_ context.Context, s *gocode.Session) error {
 	// the TOCTOU race that would exist if they were separate operations.
 	if _, err := os.Stat(f.path(s.ID)); err != nil {
 		if os.IsNotExist(err) {
-			return gocode.SessionNotFound(s.ID)
+			return luft.SessionNotFound(s.ID)
 		}
-		return fmt.Errorf("gocode: FileStore: stat session: %w", err)
+		return fmt.Errorf("luft: FileStore: stat session: %w", err)
 	}
 	return atomicWrite(f.path(s.ID), data)
 }
@@ -104,14 +104,14 @@ func (f *FileStore) Delete(_ context.Context, id string) error {
 	defer f.mu.Unlock()
 	if err := os.Remove(f.path(id)); err != nil {
 		if os.IsNotExist(err) {
-			return gocode.SessionNotFound(id)
+			return luft.SessionNotFound(id)
 		}
-		return fmt.Errorf("gocode: FileStore: delete session: %w", err)
+		return fmt.Errorf("luft: FileStore: delete session: %w", err)
 	}
 	return nil
 }
 
-func (f *FileStore) List(_ context.Context, prefix string, limit int) ([]*gocode.Session, error) {
+func (f *FileStore) List(_ context.Context, prefix string, limit int) ([]*luft.Session, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -120,7 +120,7 @@ func (f *FileStore) List(_ context.Context, prefix string, limit int) ([]*gocode
 		return nil, err
 	}
 
-	out := make([]*gocode.Session, 0, len(ids))
+	out := make([]*luft.Session, 0, len(ids))
 	for _, id := range ids {
 		s, err := f.readSession(id)
 		if err != nil {
@@ -146,7 +146,7 @@ func (f *FileStore) ListIDs(_ context.Context, prefix string, limit int) ([]stri
 func (f *FileStore) matchingIDs(prefix string, limit int) ([]string, error) {
 	entries, err := os.ReadDir(f.dir)
 	if err != nil {
-		return nil, fmt.Errorf("gocode: FileStore: read directory: %w", err)
+		return nil, fmt.Errorf("luft: FileStore: read directory: %w", err)
 	}
 	// ReadDir returns entries sorted by filename, so no explicit sort needed.
 	var ids []string
@@ -167,17 +167,17 @@ func (f *FileStore) matchingIDs(prefix string, limit int) ([]string, error) {
 
 // readSession loads and decodes the session file for id. Must be called with
 // at least a read lock held.
-func (f *FileStore) readSession(id string) (*gocode.Session, error) {
+func (f *FileStore) readSession(id string) (*luft.Session, error) {
 	data, err := os.ReadFile(f.path(id))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, gocode.SessionNotFound(id)
+			return nil, luft.SessionNotFound(id)
 		}
-		return nil, fmt.Errorf("gocode: FileStore: read session: %w", err)
+		return nil, fmt.Errorf("luft: FileStore: read session: %w", err)
 	}
-	var s gocode.Session
+	var s luft.Session
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("gocode: FileStore: unmarshal session %s: %w", id, err)
+		return nil, fmt.Errorf("luft: FileStore: unmarshal session %s: %w", id, err)
 	}
 	return &s, nil
 }
@@ -191,12 +191,12 @@ func (f *FileStore) path(id string) string {
 // hyphens, underscores, and dots.
 func validateFileSessionID(id string) error {
 	if id == "" {
-		return fmt.Errorf("gocode: FileStore: session ID must not be empty")
+		return fmt.Errorf("luft: FileStore: session ID must not be empty")
 	}
 	for _, r := range id {
 		if !('a' <= r && r <= 'z') && !('A' <= r && r <= 'Z') &&
 			!('0' <= r && r <= '9') && r != '-' && r != '_' && r != '.' {
-			return fmt.Errorf("gocode: FileStore: session ID %q contains invalid character %q", id, r)
+			return fmt.Errorf("luft: FileStore: session ID %q contains invalid character %q", id, r)
 		}
 	}
 	return nil
@@ -207,21 +207,21 @@ func validateFileSessionID(id string) error {
 func atomicWrite(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".session-*.tmp")
 	if err != nil {
-		return fmt.Errorf("gocode: FileStore: create temp file: %w", err)
+		return fmt.Errorf("luft: FileStore: create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return fmt.Errorf("gocode: FileStore: write temp file: %w", err)
+		return fmt.Errorf("luft: FileStore: write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("gocode: FileStore: close temp file: %w", err)
+		return fmt.Errorf("luft: FileStore: close temp file: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("gocode: FileStore: rename temp file: %w", err)
+		return fmt.Errorf("luft: FileStore: rename temp file: %w", err)
 	}
 	return nil
 }

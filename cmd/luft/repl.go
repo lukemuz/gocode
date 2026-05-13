@@ -12,21 +12,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // session is the mutable state owned by the REPL. It bundles the
 // running history, accumulated usage, and the auxiliary clients we
 // need for slash commands like :compact and :model.
 type session struct {
-	agent      gocode.Agent
-	summarizer *gocode.Client // typically Haiku, used by :compact
-	provider   gocode.Provider
+	agent      luft.Agent
+	summarizer *luft.Client // typically Haiku, used by :compact
+	provider   luft.Provider
 	memory     string // loaded project memory, for :memory
 
-	history []gocode.Message
-	usage   gocode.Usage // accumulated across the session
-	logPath string       // empty if no JSONL log is active
+	history []luft.Message
+	usage   luft.Usage // accumulated across the session
+	logPath string     // empty if no JSONL log is active
 }
 
 func (s *session) repl(ctx context.Context) {
@@ -56,7 +56,7 @@ func (s *session) repl(ctx context.Context) {
 }
 
 func (s *session) runTurn(ctx context.Context, input string) {
-	s.history = append(s.history, gocode.NewUserMessage(input))
+	s.history = append(s.history, luft.NewUserMessage(input))
 
 	turnCtx, cancel := signal.NotifyContext(ctx, syscall.SIGINT)
 	defer cancel()
@@ -98,7 +98,7 @@ func (s *session) runTurn(ctx context.Context, input string) {
 	// common "is it doing anything?" moment.
 	sp.Start("thinking…")
 	// And restart it before each subsequent iteration's model call.
-	s.agent.Hooks.OnIteration = func(ctx context.Context, iter int, history []gocode.Message) {
+	s.agent.Hooks.OnIteration = func(ctx context.Context, iter int, history []luft.Message) {
 		if iter == 0 {
 			return // already started above
 		}
@@ -107,13 +107,13 @@ func (s *session) runTurn(ctx context.Context, input string) {
 	defer func() { s.agent.Hooks.OnIteration = nil }()
 
 	result, err := s.agent.StepStream(turnCtx, s.history,
-		func(b gocode.ContentBlock) {
+		func(b luft.ContentBlock) {
 			sp.Stop()
 			armIdle()
 			switch b.Type {
-			case gocode.TypeText:
+			case luft.TypeText:
 				fmt.Print(b.Text)
-			case gocode.TypeToolUse:
+			case luft.TypeToolUse:
 				if b.ID == "" {
 					return
 				}
@@ -125,7 +125,7 @@ func (s *session) runTurn(ctx context.Context, input string) {
 				}
 			}
 		},
-		func(results []gocode.ToolResult) {
+		func(results []luft.ToolResult) {
 			disarmIdle()
 			sp.Stop()
 			fmt.Fprintln(os.Stderr)

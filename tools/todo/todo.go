@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 // Status is the lifecycle state of a single todo item.
@@ -55,27 +55,27 @@ func (l *List) Items() []Item {
 }
 
 // Toolset returns the two-tool toolset (todo_write, todo_read).
-func (l *List) Toolset() gocode.Toolset {
-	return gocode.Tools(l.writeBinding(), l.readBinding())
+func (l *List) Toolset() luft.Toolset {
+	return luft.Tools(l.writeBinding(), l.readBinding())
 }
 
 type writeInput struct {
 	Items []Item `json:"items"`
 }
 
-func (l *List) writeBinding() gocode.ToolBinding {
-	t, fn := gocode.NewTypedTool(
+func (l *List) writeBinding() luft.ToolBinding {
+	t, fn := luft.NewTypedTool(
 		"todo_write",
 		"Replace the agent's planning todo list with a new set of items. Each item has 'content' and 'status' (pending|in_progress|completed). Call this whenever your plan changes — at the start of a multi-step task, when finishing a step, or when the plan needs revision. Keep at most one item in_progress.",
-		gocode.InputSchema{
+		luft.InputSchema{
 			Type: "object",
-			Properties: map[string]gocode.SchemaProperty{
+			Properties: map[string]luft.SchemaProperty{
 				"items": {
 					Type:        "array",
 					Description: "Full replacement list of todo items.",
-					Items: &gocode.SchemaProperty{
+					Items: &luft.SchemaProperty{
 						Type: "object",
-						Properties: map[string]gocode.SchemaProperty{
+						Properties: map[string]luft.SchemaProperty{
 							"content": {Type: "string"},
 							"status":  {Type: "string", Enum: []any{"pending", "in_progress", "completed"}},
 						},
@@ -102,19 +102,19 @@ func (l *List) writeBinding() gocode.ToolBinding {
 			return l.render(), nil
 		},
 	)
-	return gocode.ToolBinding{Tool: t, Func: fn}
+	return luft.ToolBinding{Tool: t, Func: fn}
 }
 
-func (l *List) readBinding() gocode.ToolBinding {
-	t, fn := gocode.NewTypedTool(
+func (l *List) readBinding() luft.ToolBinding {
+	t, fn := luft.NewTypedTool(
 		"todo_read",
 		"Return the current planning todo list as a numbered checklist.",
-		gocode.InputSchema{Type: "object", Properties: map[string]gocode.SchemaProperty{}},
+		luft.InputSchema{Type: "object", Properties: map[string]luft.SchemaProperty{}},
 		func(ctx context.Context, _ struct{}) (string, error) {
 			return l.render(), nil
 		},
 	)
-	return gocode.ToolBinding{Tool: t, Func: fn}
+	return luft.ToolBinding{Tool: t, Func: fn}
 }
 
 func (l *List) render() string {

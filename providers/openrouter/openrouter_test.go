@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lukemuz/gocode"
+	"github.com/lukemuz/luft"
 )
 
 type captureRequest struct {
@@ -48,11 +48,11 @@ func TestSystemCacheEmitsTypedParts(t *testing.T) {
 	srv, cap := newCaptureServer(t)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:       "anthropic/claude-test",
 		System:      "stable instructions",
-		Messages:    []gocode.Message{gocode.NewUserMessage("hi")},
-		SystemCache: gocode.Ephemeral(),
+		Messages:    []luft.Message{luft.NewUserMessage("hi")},
+		SystemCache: luft.Ephemeral(),
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -83,10 +83,10 @@ func TestNoCacheMarkerKeepsString(t *testing.T) {
 	srv, cap := newCaptureServer(t)
 	p := newProviderForTest(t, srv.URL)
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "anthropic/claude-test",
 		System:   "stable",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -104,14 +104,14 @@ func TestToolCacheControlEmitted(t *testing.T) {
 	srv, cap := newCaptureServer(t)
 	p := newProviderForTest(t, srv.URL)
 
-	tool := gocode.NewTool("calc", "do math",
-		gocode.Object(gocode.Number("a", "v", gocode.Required())))
-	tool.CacheControl = gocode.Ephemeral()
+	tool := luft.NewTool("calc", "do math",
+		luft.Object(luft.Number("a", "v", luft.Required())))
+	tool.CacheControl = luft.Ephemeral()
 
-	_, err := p.Call(context.Background(), gocode.ProviderRequest{
+	_, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "anthropic/claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
-		Tools:    []gocode.Tool{tool},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
+		Tools:    []luft.Tool{tool},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
@@ -129,9 +129,9 @@ func TestDecodesCachedTokens(t *testing.T) {
 	srv, _ := newCaptureServer(t)
 	p := newProviderForTest(t, srv.URL)
 
-	out, err := p.Call(context.Background(), gocode.ProviderRequest{
+	out, err := p.Call(context.Background(), luft.ProviderRequest{
 		Model:    "anthropic/claude-test",
-		Messages: []gocode.Message{gocode.NewUserMessage("hi")},
+		Messages: []luft.Message{luft.NewUserMessage("hi")},
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)

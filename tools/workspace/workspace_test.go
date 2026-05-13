@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
 // setupTestDir creates a temporary directory with a small tree for tests.

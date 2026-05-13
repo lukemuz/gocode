@@ -1,4 +1,4 @@
-package gocode
+package luft
 
 import (
 	"context"
@@ -45,10 +45,10 @@ type Client struct {
 // Returns an error if Provider or Model is empty.
 func New(cfg Config) (*Client, error) {
 	if cfg.Provider == nil {
-		return nil, fmt.Errorf("gocode: Config.Provider is required")
+		return nil, fmt.Errorf("luft: Config.Provider is required")
 	}
 	if cfg.Model == "" {
-		return nil, fmt.Errorf("gocode: Config.Model is required")
+		return nil, fmt.Errorf("luft: Config.Model is required")
 	}
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = defaultMaxTokens
@@ -62,7 +62,7 @@ func New(cfg Config) (*Client, error) {
 // Client is independent: mutations to one do not affect the other.
 //
 // For more elaborate derivation (different MaxTokens, different Retry),
-// construct a fresh Client with gocode.New.
+// construct a fresh Client with luft.New.
 func (c *Client) WithModel(model string) *Client {
 	cfg := c.cfg
 	cfg.Model = model

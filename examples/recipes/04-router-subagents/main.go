@@ -1,6 +1,6 @@
 // Recipe 04: a router orchestrator that delegates to specialist subagents.
 //
-// The headline claim: in gocode, a subagent is a ToolFunc that happens to call
+// The headline claim: in luft, a subagent is a ToolFunc that happens to call
 // Loop. There is no SubAgent type. The parent's dispatch map is the routing
 // mechanism. This file demonstrates that pattern end-to-end.
 //
@@ -25,10 +25,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lukemuz/gocode"
-	"github.com/lukemuz/gocode/providers/anthropic"
-	"github.com/lukemuz/gocode/tools/clock"
-	"github.com/lukemuz/gocode/tools/workspace"
+	"github.com/lukemuz/luft"
+	"github.com/lukemuz/luft/providers/anthropic"
+	"github.com/lukemuz/luft/tools/clock"
+	"github.com/lukemuz/luft/tools/workspace"
 )
 
 func main() {
@@ -49,18 +49,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	smart, err := gocode.New(gocode.Config{Provider: provider, Model: gocode.ModelSonnet, MaxTokens: 4096})
+	smart, err := luft.New(luft.Config{Provider: provider, Model: luft.ModelSonnet, MaxTokens: 4096})
 	if err != nil {
 		log.Fatal(err)
 	}
-	cheap := smart.WithModel(gocode.ModelHaiku)
+	cheap := smart.WithModel(luft.ModelHaiku)
 
 	// Research subagent: workspace + clock, sandboxed to -dir.
 	ws, err := workspace.NewReadOnly(workspace.Config{Root: *dir})
 	if err != nil {
 		log.Fatal(err)
 	}
-	researchTools := gocode.MustJoin(clock.New().Toolset(), ws.Toolset())
+	researchTools := luft.MustJoin(clock.New().Toolset(), ws.Toolset())
 
 	researchTool, researchFn := subagentTool(
 		"research",
@@ -84,25 +84,25 @@ func main() {
 		cheap,
 		"You are a writing specialist. Turn the supplied notes into a clear, "+
 			"well-structured answer. Be specific. Do not invent facts beyond the notes.",
-		gocode.Toolset{},
+		luft.Toolset{},
 		2,
 	)
 
-	orchestrator := gocode.Agent{
+	orchestrator := luft.Agent{
 		Client: smart,
 		System: "You are an orchestrator. You have two specialists available as tools: " +
 			"`research` (can inspect the project directory) and `write` (turns notes into prose). " +
 			"For factual questions about the codebase, call `research` first, then `write` to " +
 			"format the final answer. For pure writing tasks, skip `research`. " +
 			"Return only the final polished answer to the user.",
-		Tools: gocode.Tools(
-			gocode.ToolBinding{Tool: researchTool, Func: researchFn, Meta: gocode.ToolMetadata{Source: "subagent/research"}},
-			gocode.ToolBinding{Tool: writeTool, Func: writeFn, Meta: gocode.ToolMetadata{Source: "subagent/write"}},
+		Tools: luft.Tools(
+			luft.ToolBinding{Tool: researchTool, Func: researchFn, Meta: luft.ToolMetadata{Source: "subagent/research"}},
+			luft.ToolBinding{Tool: writeTool, Func: writeFn, Meta: luft.ToolMetadata{Source: "subagent/write"}},
 		),
 		MaxIter: 6,
 	}
 
-	history := []gocode.Message{gocode.NewUserMessage(question)}
+	history := []luft.Message{luft.NewUserMessage(question)}
 	result, err := orchestrator.Step(ctx, history)
 	if err != nil {
 		log.Fatal(err)
@@ -117,30 +117,30 @@ func main() {
 // a single tool the parent can call. The schema is a fixed {task: string}.
 //
 // This is *not* a library API — it lives in this example precisely because
-// the gocode position is that subagents do not need a dedicated type. If this
+// the luft position is that subagents do not need a dedicated type. If this
 // helper proves useful across multiple recipes, that's the point at which it
 // might earn a place in the library, not before.
 func subagentTool(
 	name, description string,
-	client *gocode.Client,
+	client *luft.Client,
 	system string,
-	tools gocode.Toolset,
+	tools luft.Toolset,
 	maxIter int,
-) (gocode.Tool, gocode.ToolFunc) {
+) (luft.Tool, luft.ToolFunc) {
 	type input struct {
 		Task string `json:"task"`
 	}
-	return gocode.NewTypedTool[input](
+	return luft.NewTypedTool[input](
 		name,
 		description,
-		gocode.Object(
-			gocode.String("task", "Self-contained task description for the specialist", gocode.Required()),
+		luft.Object(
+			luft.String("task", "Self-contained task description for the specialist", luft.Required()),
 		),
 		func(ctx context.Context, in input) (string, error) {
 			result, err := client.Loop(
 				ctx,
 				system,
-				[]gocode.Message{gocode.NewUserMessage(in.Task)},
+				[]luft.Message{luft.NewUserMessage(in.Task)},
 				tools,
 				maxIter,
 			)
@@ -160,9 +160,9 @@ func subagentTool(
 
 // summarizeOnError extracts whatever text the subagent managed to produce
 // before failing. This is best-effort context for the parent agent.
-func summarizeOnError(result gocode.LoopResult) string {
+func summarizeOnError(result luft.LoopResult) string {
 	for i := len(result.Messages) - 1; i >= 0; i-- {
-		if t := gocode.TextContent(result.Messages[i]); t != "" {
+		if t := luft.TextContent(result.Messages[i]); t != "" {
 			b, _ := json.Marshal(map[string]string{"partial": t})
 			return string(b)
 		}

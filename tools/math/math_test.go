@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	mathtools "github.com/lukemuz/gocode/tools/math"
+	mathtools "github.com/lukemuz/luft/tools/math"
 )
 
 func callCalc(t *testing.T, op string, a, b float64) string {

@@ -10,7 +10,7 @@ import (
 // for the confirmation prompt. ok is false when the tool is not an editor
 // or the input cannot be parsed — callers should fall back to JSON.
 //
-// Supported tool names match both the gocode editor toolset and Anthropic's
+// Supported tool names match both the luft editor toolset and Anthropic's
 // trained text_editor bindings.
 func renderEditPreview(toolName string, input json.RawMessage) (string, bool) {
 	switch toolName {
